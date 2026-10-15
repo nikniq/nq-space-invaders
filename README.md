@@ -19,6 +19,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - **Perfect wave** bonus for clearing a wave without losing a life; accuracy and best combo shown at game over
 - **Share your score** from the game-over screen (system share sheet or clipboard)
 - Muzzle flash, thruster flames and wave-clear fireworks
+- **Graphics**: bevelled, glowing pixel sprites; scrolling parallax starfield over a nebula with a planet on the horizon; warp-speed star streaks between waves; additive-light explosions with sparks and shockwave rings; glowing bolts with trails; shaded bunkers; boss engine lights and damage smoke; waves slide in from the sides; CRT scanlines and vignette; sharp on high-DPI screens
 - **Installable** as an app and playable offline (web manifest + service worker)
 - Keyboard, gamepad and on-screen touch controls; scales to any screen; fullscreen toggle
 

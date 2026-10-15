@@ -8,6 +8,12 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const W = canvas.width;
 const H = canvas.height;
+// Draw in 800x600 logical units but back the canvas with device pixels so
+// text, glows and pixel edges stay sharp on high-DPI screens.
+const DPR = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+canvas.width = W * DPR;
+canvas.height = H * DPR;
+ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 ctx.imageSmoothingEnabled = false;
 
 // ---------------------------------------------------------------------------
@@ -113,18 +119,102 @@ const PIX = {
     ],
 };
 
-function renderSprite(rows, color, scale) {
+function hexRgb(hex) {
+    let h = String(hex).replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const n = parseInt(h, 16);
+    if (isNaN(n)) return [255, 255, 255];
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function shade(hex, amt) {
+    const [r, g, b] = hexRgb(hex);
+    const t = amt < 0 ? 0 : 255, a = Math.abs(amt);
+    const m = v => Math.round(v + (t - v) * a);
+    return `rgb(${m(r)},${m(g)},${m(b)})`;
+}
+function rgba(hex, a) {
+    const [r, g, b] = hexRgb(hex);
+    return `rgba(${r},${g},${b},${a})`;
+}
+function makeCanvas(w, h) {
     const c = document.createElement('canvas');
-    c.width = rows[0].length * scale;
-    c.height = rows.length * scale;
+    c.width = Math.max(1, Math.ceil(w));
+    c.height = Math.max(1, Math.ceil(h));
+    return c;
+}
+
+// Pixel sprite with a bevel (lit top edges, shadowed bottom edges), a soft
+// vertical sheen, and a pre-blurred glow copy so the frame loop never pays
+// for shadowBlur.
+const GLOW_PAD = 12;
+function renderSprite(rows, color, scale, glow = true) {
+    const c = makeCanvas(rows[0].length * scale, rows.length * scale);
     const g = c.getContext('2d');
-    g.fillStyle = color;
+    const hi = shade(color, 0.6), lo = shade(color, -0.4);
+    const on = (x, y) => y >= 0 && y < rows.length && rows[y][x] === '#';
     rows.forEach((row, y) => {
         for (let x = 0; x < row.length; x++) {
-            if (row[x] === '#') g.fillRect(x * scale, y * scale, scale, scale);
+            if (row[x] !== '#') continue;
+            g.fillStyle = color;
+            g.fillRect(x * scale, y * scale, scale, scale);
+            if (!on(x, y - 1)) { g.fillStyle = hi; g.fillRect(x * scale, y * scale, scale, 1); }
+            if (!on(x, y + 1)) { g.fillStyle = lo; g.fillRect(x * scale, y * scale + scale - 1, scale, 1); }
         }
     });
+    g.globalCompositeOperation = 'source-atop';
+    const sheen = g.createLinearGradient(0, 0, 0, c.height);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.25)');
+    sheen.addColorStop(0.45, 'rgba(255,255,255,0)');
+    sheen.addColorStop(1, 'rgba(0,0,0,0.3)');
+    g.fillStyle = sheen;
+    g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = 'source-over';
+    if (glow) c.glow = makeGlow(c, color);
     return c;
+}
+function makeGlow(src, color, blur = 10) {
+    const c = makeCanvas(src.width + GLOW_PAD * 2, src.height + GLOW_PAD * 2);
+    const g = c.getContext('2d');
+    g.shadowColor = color;
+    g.shadowBlur = blur;
+    g.drawImage(src, GLOW_PAD, GLOW_PAD);
+    g.drawImage(src, GLOW_PAD, GLOW_PAD);
+    return c;
+}
+function drawSprite(spr, x, y, glowAlpha = 0.55) {
+    x = Math.round(x); y = Math.round(y);
+    if (spr.glow && glowAlpha > 0) {
+        const a0 = ctx.globalAlpha;
+        ctx.globalAlpha = a0 * glowAlpha;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(spr.glow, x - GLOW_PAD, y - GLOW_PAD);
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = a0;
+    }
+    ctx.drawImage(spr, x, y);
+}
+
+// Soft radial light, one cached texture per colour. Drawn with 'lighter'.
+const LIGHTS = {};
+function lightSprite(color) {
+    if (LIGHTS[color]) return LIGHTS[color];
+    const c = makeCanvas(64, 64);
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, rgba(color, 1));
+    grad.addColorStop(0.3, rgba(color, 0.4));
+    grad.addColorStop(1, rgba(color, 0));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return (LIGHTS[color] = c);
+}
+function drawLight(x, y, size, color, alpha = 1) {
+    const a0 = ctx.globalAlpha;
+    ctx.globalAlpha = a0 * alpha;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(lightSprite(color), x - size / 2, y - size / 2, size, size);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = a0;
 }
 
 const SCALE = 3;
@@ -140,6 +230,93 @@ const SPR = {
     burst: {},
 };
 for (const k of ['squid', 'crab', 'octopus', 'ufo', 'boss']) SPR.burst[k] = renderSprite(PIX.burst, COLORS[k], SCALE);
+
+// Deep-space gradient with nebula clouds. Tiles vertically so it can scroll.
+const BG = (() => {
+    const c = makeCanvas(W, H);
+    const g = c.getContext('2d');
+    const base = g.createLinearGradient(0, 0, 0, H);
+    base.addColorStop(0, '#07071a');
+    base.addColorStop(0.6, '#0b0820');
+    base.addColorStop(1, '#050510');
+    g.fillStyle = base;
+    g.fillRect(0, 0, W, H);
+    const blobs = [
+        [0.2, 0.25, 260, '#3a1f6e', 0.35], [0.75, 0.15, 220, '#123a6e', 0.3],
+        [0.6, 0.6, 300, '#4a1450', 0.22], [0.1, 0.8, 200, '#0f4a5a', 0.22],
+        [0.9, 0.85, 240, '#2a1a5e', 0.25],
+    ];
+    for (const [bx, by, r, col, a] of blobs) {
+        for (const dy of [-H, 0, H]) {
+            const cx = bx * W, cy = by * H + dy;
+            const grad = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+            grad.addColorStop(0, rgba(col, a));
+            grad.addColorStop(1, rgba(col, 0));
+            g.fillStyle = grad;
+            g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        }
+    }
+    return c;
+})();
+
+// A planet's limb along the bottom of the screen, behind the battlefield.
+const PLANET = (() => {
+    const c = makeCanvas(W, 160);
+    const g = c.getContext('2d');
+    const cx = W * 0.35, cy = 160 + 520, r = 600;
+    const atmo = g.createRadialGradient(cx, cy, r - 10, cx, cy, r + 40);
+    atmo.addColorStop(0, 'rgba(90,215,255,0.35)');
+    atmo.addColorStop(1, 'rgba(90,215,255,0)');
+    g.fillStyle = atmo;
+    g.fillRect(0, 0, W, 160);
+    const body = g.createRadialGradient(cx - 120, cy - r + 40, 20, cx, cy, r);
+    body.addColorStop(0, '#24306a');
+    body.addColorStop(0.5, '#141a40');
+    body.addColorStop(1, '#0a0c22');
+    g.fillStyle = body;
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.fill();
+    return c;
+})();
+
+const GROUND = (() => {
+    const c = makeCanvas(W, 28);
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 28);
+    grad.addColorStop(0, 'rgba(60,255,90,0.22)');
+    grad.addColorStop(1, 'rgba(60,255,90,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, W, 28);
+    return c;
+})();
+
+// Scanlines + vignette at device resolution, so lines stay one pixel sharp.
+const CRT = (() => {
+    const c = makeCanvas(W * DPR, H * DPR);
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.13)';
+    for (let y = 0; y < H; y += 3) g.fillRect(0, y * DPR, W * DPR, DPR);
+    const v = g.createRadialGradient(W * DPR / 2, H * DPR / 2, H * DPR * 0.35, W * DPR / 2, H * DPR / 2, H * DPR * 0.85);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.5)');
+    g.fillStyle = v;
+    g.fillRect(0, 0, W * DPR, H * DPR);
+    return c;
+})();
+
+// Bolt trails, pre-rendered as vertical fades.
+function trailSprite(color, len) {
+    const c = makeCanvas(4, len);
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, len);
+    grad.addColorStop(0, rgba(color, 0.7));
+    grad.addColorStop(1, rgba(color, 0));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 4, len);
+    return c;
+}
+const TRAIL = { player: trailSprite('#8dffa0', 30), enemy: trailSprite('#ffd25a', 18) };
 
 const INVADER_TYPES = {
     squid: { frames: SPR.squid, points: 30, color: COLORS.squid },
@@ -308,6 +485,9 @@ class Bunker {
         BUNKER_SHAPE.forEach((row, r) => {
             for (let c = 0; c < this.cols; c++) this.cells[r * this.cols + c] = row[c] === '#' ? 1 : 0;
         });
+        // Rendered to its own canvas and redrawn only after damage.
+        this.cache = makeCanvas(this.w, this.h);
+        this.dirty = true;
     }
     // Returns true if the rect hit solid cells; erodes a blob around the hit.
     hit(rect, radius = 2.5) {
@@ -330,6 +510,7 @@ class Bunker {
                 if (d <= radius || (d <= radius + 1.5 && Math.random() < 0.4)) this.cells[r * this.cols + c] = 0;
             }
         }
+        this.dirty = true;
         return true;
     }
     // Invaders simply carve away whatever they overlap.
@@ -339,18 +520,31 @@ class Bunker {
             for (let c = 0; c < this.cols; c++) {
                 const cx = this.x + c * CELL, cy = this.y + r * CELL;
                 if (cx < rect.x + rect.w && cx + CELL > rect.x && cy < rect.y + rect.h && cy + CELL > rect.y) {
+                    if (this.cells[r * this.cols + c]) this.dirty = true;
                     this.cells[r * this.cols + c] = 0;
                 }
             }
         }
     }
-    draw() {
-        ctx.fillStyle = COLORS.player;
+    render() {
+        const g = this.cache.getContext('2d');
+        g.clearRect(0, 0, this.w, this.h);
+        const on = (r, c) => r >= 0 && c >= 0 && r < this.rows && c < this.cols && this.cells[r * this.cols + c];
         for (let r = 0; r < this.rows; r++) {
             for (let c = 0; c < this.cols; c++) {
-                if (this.cells[r * this.cols + c]) ctx.fillRect(this.x + c * CELL, this.y + r * CELL, CELL, CELL);
+                if (!this.cells[r * this.cols + c]) continue;
+                const x = c * CELL, y = r * CELL;
+                g.fillStyle = r < 4 ? '#2fd94e' : r < 10 ? '#22b33c' : '#198a2e';
+                g.fillRect(x, y, CELL, CELL);
+                if (!on(r - 1, c)) { g.fillStyle = '#b4ffc0'; g.fillRect(x, y, CELL, 1); }
+                if (!on(r, c - 1) || !on(r, c + 1)) { g.fillStyle = 'rgba(180,255,192,0.35)'; g.fillRect(!on(r, c - 1) ? x : x + CELL - 1, y, 1, CELL); }
             }
         }
+        this.dirty = false;
+    }
+    draw() {
+        if (this.dirty) this.render();
+        ctx.drawImage(this.cache, this.x, this.y);
     }
 }
 
@@ -444,6 +638,12 @@ const G = {
     diveTimer: 0,
     fireworkTimer: 0,
     toast: null,
+    rings: [],
+    lights: [],
+    warp: 1,
+    bgScroll: 0,
+    readyTotal: 1,
+    waveIntro: false,
 };
 G.hiScore = G.scores.length ? G.scores[0].score : 0;
 {
@@ -458,8 +658,8 @@ G.hiScore = G.scores.length ? G.scores[0].score : 0;
 
 const input = { left: false, right: false, fire: false, firePressed: false };
 
-for (let i = 0; i < 90; i++) {
-    G.stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.4 + 0.3, p: Math.random() * Math.PI * 2 });
+for (let i = 0; i < 100; i++) {
+    G.stars.push({ x: Math.random() * W, y: Math.random() * H, z: i < 60 ? 0 : i < 80 ? 1 : 2, p: Math.random() * Math.PI * 2 });
 }
 
 function multiplier() { return 1 + Math.min(3, Math.floor(G.combo / 5)); }
@@ -498,7 +698,7 @@ function makeFleet() {
 function makeBoss() {
     const hp = 12 + G.wave * 2;
     return {
-        x: W / 2 - SPR.boss.width / 2, y: 70, w: SPR.boss.width, h: SPR.boss.height,
+        x: W / 2 - SPR.boss.width / 2, y: 100, w: SPR.boss.width, h: SPR.boss.height,
         hp, maxHp: hp, t: 0, fireTimer: 2.5, flash: 0, points: 1000 + (G.wave / BOSS_EVERY - 1) * 500,
     };
 }
@@ -524,6 +724,8 @@ function startGame() {
     G.particles = [];
     G.popups = [];
     G.corpses = [];
+    G.rings = [];
+    G.lights = [];
     G.powerups = [];
     G.power = { type: null, timer: 0 };
     G.shield = 0;
@@ -544,6 +746,7 @@ function startWave() {
     G.powerups = [];
     G.enemyFireTimer = 1.5;
     G.waveLostLife = false;
+    G.waveIntro = true;
     G.diveTimer = rand(4, 7);
     G.ufo = null;
     G.ufoTimer = rand(12, 20);
@@ -570,7 +773,11 @@ function burst(x, y, color, n = 14, speed = 160) {
     for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
         const s = rand(speed * 0.3, speed);
-        G.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.7), max: 0.7, color, size: rand(2, 4) });
+        G.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.7), max: 0.7, color, size: rand(2, 4), spark: Math.random() < 0.5 });
+    }
+    if (n >= 10) {
+        G.rings.push({ x, y, r: 4, max: speed * 0.35, life: 0.35, total: 0.35, color });
+        G.lights.push({ x, y, size: speed * 0.9, color, life: 0.25, total: 0.25 });
     }
 }
 
@@ -644,6 +851,7 @@ function missShot() {
 function getReady(secs) {
     G.state = 'ready';
     G.stateTimer = secs;
+    G.readyTotal = secs;
     G.targetX = null;
 }
 
@@ -715,6 +923,10 @@ function hintText(kind) {
 // ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
+const STAR_SPEED = [6, 16, 38];
+const STAR_SIZE = [1, 1.6, 2.2];
+const STAR_BRIGHT = [0.35, 0.6, 0.95];
+
 function aliveInvaders() { return G.invaders.filter(i => i.alive); }
 
 function fleetInterval(aliveCount) {
@@ -745,6 +957,17 @@ function update(dt) {
     for (const c of G.corpses) c.life -= dt;
     G.corpses = G.corpses.filter(c => c.life > 0);
     if (G.toast) { G.toast.life -= dt; if (G.toast.life <= 0) G.toast = null; }
+    for (const r of G.rings) { r.life -= dt; r.r += (r.max - r.r) * Math.min(1, dt * 9); }
+    G.rings = G.rings.filter(r => r.life > 0);
+    for (const l of G.lights) l.life -= dt;
+    G.lights = G.lights.filter(l => l.life > 0);
+    const warpTarget = G.state === 'wavecleared' ? (G.reduceMotion ? 3 : 28) : 1;
+    G.warp += (warpTarget - G.warp) * Math.min(1, dt * 2.2);
+    G.bgScroll = (G.bgScroll + 4 * G.warp * dt) % H;
+    for (const st of G.stars) {
+        st.y += STAR_SPEED[st.z] * G.warp * dt;
+        if (st.y > H) { st.y -= H; st.x = Math.random() * W; }
+    }
 
     if (G.state === 'dying') {
         G.stateTimer -= dt;
@@ -777,7 +1000,7 @@ function update(dt) {
     if (G.state === 'ready') {
         G.stateTimer -= dt;
         movePlayer(dt);
-        if (G.stateTimer <= 0) G.state = 'playing';
+        if (G.stateTimer <= 0) { G.state = 'playing'; G.waveIntro = false; }
         return;
     }
     if (G.state === 'gameover') { G.stateTimer -= dt; return; }
@@ -922,8 +1145,11 @@ function update(dt) {
         const bs = G.boss;
         bs.t += dt;
         bs.x = W / 2 - bs.w / 2 + Math.sin(bs.t * 0.9) * (W / 2 - bs.w / 2 - 30);
-        bs.y = 70 + Math.sin(bs.t * 2.3) * 14;
+        bs.y = 100 + Math.sin(bs.t * 2.3) * 14;
         if (bs.flash > 0) bs.flash -= dt;
+        if (bs.hp < bs.maxHp / 2 && Math.random() < dt * (bs.hp < bs.maxHp / 4 ? 30 : 14)) {
+            G.particles.push({ x: bs.x + rand(10, bs.w - 10), y: bs.y + rand(4, bs.h - 4), vx: rand(-20, 20), vy: rand(-60, -30), life: rand(0.5, 0.9), max: 0.9, color: Math.random() < 0.3 ? '#ff8c3b' : '#444', size: rand(3, 6), smoke: true });
+        }
         bs.fireTimer -= dt;
         if (bs.fireTimer <= 0) {
             const cx = bs.x + bs.w / 2, cy = bs.y + bs.h;
@@ -1144,15 +1370,35 @@ function text(str, x, y, size, color = '#fff', align = 'center') {
     ctx.font = `bold ${size}px ${FONT}`;
     ctx.textAlign = align;
     ctx.textBaseline = 'middle';
+    if (size >= 28) { ctx.shadowColor = color; ctx.shadowBlur = 18; }
     ctx.fillText(str, x, y);
+    if (size >= 28) ctx.shadowBlur = 0;
 }
 
-function drawStars() {
-    for (const s of G.stars) {
-        const a = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(G.time * 1.6 + s.p));
-        ctx.fillStyle = `rgba(200,220,255,${a.toFixed(2)})`;
-        ctx.fillRect(s.x, s.y, s.r, s.r);
+function drawBackground() {
+    ctx.imageSmoothingEnabled = true;
+    const off = G.bgScroll;
+    ctx.drawImage(BG, 0, off - H);
+    ctx.drawImage(BG, 0, off);
+    ctx.imageSmoothingEnabled = false;
+    const streak = G.warp > 2;
+    for (const st of G.stars) {
+        const tw = 0.6 + 0.4 * Math.sin(G.time * 1.6 + st.p);
+        const a = STAR_BRIGHT[st.z] * tw;
+        const sz = STAR_SIZE[st.z];
+        ctx.fillStyle = st.z === 2 ? `rgba(255,255,255,${a.toFixed(2)})` : `rgba(190,210,255,${a.toFixed(2)})`;
+        if (streak) {
+            const len = Math.min(48, STAR_SPEED[st.z] * G.warp * 0.045);
+            ctx.globalAlpha = 0.55;
+            ctx.fillRect(st.x, st.y - len, Math.max(1, sz - 0.6), len + sz);
+            ctx.globalAlpha = 1;
+        } else {
+            ctx.fillRect(st.x, st.y, sz, sz);
+        }
     }
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(PLANET, 0, H - 160);
+    ctx.imageSmoothingEnabled = false;
 }
 
 function drawHud() {
@@ -1190,6 +1436,9 @@ function drawHud() {
     }
 
     // Lives + ground line
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(GROUND, 0, H - 28);
+    ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = COLORS.player;
     ctx.fillRect(0, H - 28, W, 2);
     const lowLife = G.lives === 1 && (G.state === 'playing' || G.state === 'ready') && Math.sin(G.time * 6) > 0;
@@ -1205,63 +1454,172 @@ function drawPlayer() {
     const p = G.player;
     if (G.state === 'dying') return;
     if (p.invuln > 0 && Math.floor(G.time * 12) % 2 === 0) return;
-    ctx.drawImage(SPR.player, Math.round(p.x), p.y);
+    drawSprite(SPR.player, p.x, p.y, 0.7);
     const moving = G.state === 'playing' && (input.left || input.right || (G.targetX !== null && Math.abs(G.targetX - (p.x + p.w / 2)) > 4));
+    ctx.globalCompositeOperation = 'lighter';
     if (moving) {
         const flick = Math.random();
-        ctx.fillStyle = flick < 0.5 ? '#ffd25a' : '#ff8c3b';
         const dir = input.right || (G.targetX !== null && G.targetX > p.x + p.w / 2) ? -1 : 1;
         const fx = dir < 0 ? p.x - 6 : p.x + p.w;
+        drawLight(fx + 3, p.y + p.h - 7, 26 + flick * 10, '#ff8c3b', 0.8);
+        ctx.fillStyle = flick < 0.5 ? '#ffd25a' : '#ff8c3b';
         ctx.fillRect(fx, p.y + p.h - 10, 6, 4 + flick * 4);
     }
     if (G.shield > 0) {
-        ctx.strokeStyle = POWERUPS.shield.color;
-        ctx.lineWidth = 2;
-        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(G.time * 8);
+        const cx = p.x + p.w / 2, cy = p.y + p.h / 2 + 2;
+        const rx = p.w / 2 + 12, ry = p.h / 2 + 12;
+        const pulse = 0.5 + 0.3 * Math.sin(G.time * 8);
+        ctx.fillStyle = rgba(POWERUPS.shield.color, 0.08 + 0.05 * pulse);
         ctx.beginPath();
-        ctx.ellipse(p.x + p.w / 2, p.y + p.h / 2 + 2, p.w / 2 + 10, p.h / 2 + 10, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = rgba(POWERUPS.shield.color, pulse);
+        ctx.lineWidth = 2;
         ctx.stroke();
-        ctx.globalAlpha = 1;
+        ctx.strokeStyle = rgba('#ffffff', 0.5 * pulse);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx - 4, ry - 4, 0, Math.PI * 1.15, Math.PI * 1.55);
+        ctx.stroke();
     }
+    ctx.globalCompositeOperation = 'source-over';
+}
+
+function easeOutBack(t) {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
 function drawPlayfield() {
     for (const bk of G.bunkers) bk.draw();
+
+    // Invaders slide in row by row from alternating sides at wave start.
+    const intro = G.state === 'ready' && G.waveIntro;
+    const prog = intro ? 1 - G.stateTimer / G.readyTotal : 1;
     for (const inv of G.invaders) {
-        if (inv.alive) ctx.drawImage(INVADER_TYPES[inv.type].frames[G.fleetFrame], Math.round(inv.x), Math.round(inv.y));
+        if (!inv.alive) continue;
+        const spr = INVADER_TYPES[inv.type].frames[G.fleetFrame];
+        if (intro) {
+            const t = clamp(prog * 1.9 - inv.row * 0.16, 0, 1);
+            const e = easeOutBack(t);
+            const side = inv.row % 2 ? 1 : -1;
+            ctx.globalAlpha = clamp(t * 2.5, 0, 1);
+            drawSprite(spr, inv.x + side * (1 - e) * W, inv.y, 0.5);
+            ctx.globalAlpha = 1;
+        } else {
+            if (inv.dive) {
+                ctx.globalCompositeOperation = 'lighter';
+                drawLight(inv.x + inv.w / 2, inv.y + inv.h / 2, 60, INVADER_TYPES[inv.type].color, 0.35);
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            drawSprite(spr, inv.x, inv.y, 0.5);
+        }
     }
-    for (const c of G.corpses) ctx.drawImage(c.spr, Math.round(c.x), Math.round(c.y));
-    if (G.ufo) ctx.drawImage(SPR.ufo, Math.round(G.ufo.x), G.ufo.y);
-    if (G.boss) ctx.drawImage(G.boss.flash > 0 ? SPR.bossFlash : SPR.boss, Math.round(G.boss.x), Math.round(G.boss.y));
+    for (const c of G.corpses) drawSprite(c.spr, c.x, c.y, 0.9);
+
+    if (G.ufo) {
+        const u = G.ufo;
+        drawSprite(SPR.ufo, u.x, u.y, 0.7);
+        const lit = Math.floor(G.time * 10) % 4;
+        for (let i = 0; i < 4; i++) {
+            ctx.fillStyle = i === lit ? '#ffd25a' : '#5a1010';
+            ctx.fillRect(Math.round(u.x) + (3 + i * 3) * SCALE, u.y + 3 * SCALE, SCALE, SCALE);
+        }
+    }
+    if (G.boss) {
+        const bs = G.boss;
+        ctx.globalCompositeOperation = 'lighter';
+        drawLight(bs.x + bs.w / 2, bs.y + bs.h + 6, 180, COLORS.boss, 0.25 + 0.1 * Math.sin(G.time * 5));
+        ctx.globalCompositeOperation = 'source-over';
+        drawSprite(bs.flash > 0 ? SPR.bossFlash : SPR.boss, bs.x, bs.y, 0.8);
+        // Engine lights along the underside, blinking in sequence.
+        for (let i = 0; i < 5; i++) {
+            const on = (Math.floor(G.time * 6) + i) % 5 === 0;
+            ctx.fillStyle = on ? '#fff3c0' : '#7a3a10';
+            ctx.fillRect(Math.round(bs.x + bs.w * (0.2 + i * 0.15)) - 2, Math.round(bs.y + bs.h * 0.62), 4, 4);
+        }
+    }
     drawPlayer();
 
-    ctx.fillStyle = '#e8ffe8';
+    // Everything below glows: draw additively.
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    for (const b of G.playerBullets) {
+        ctx.drawImage(TRAIL.player, Math.round(b.x), Math.round(b.y + b.h), b.w, 30);
+        drawLight(b.x + b.w / 2, b.y + 4, 26, '#8dffa0', 0.6);
+    }
+    for (const eb of G.enemyBullets) {
+        ctx.drawImage(TRAIL.enemy, Math.round(eb.x), Math.round(eb.y - 18), eb.w, 18);
+        drawLight(eb.x + eb.w / 2, eb.y + eb.h / 2, 28, '#ffd25a', 0.55);
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#f4fff4';
     for (const b of G.playerBullets) ctx.fillRect(Math.round(b.x), Math.round(b.y), b.w, b.h);
-
-    ctx.fillStyle = '#ffd25a';
     for (const eb of G.enemyBullets) {
         const zig = Math.sin(G.time * 30 + eb.wobble) > 0 ? 2 : -2;
+        ctx.fillStyle = '#ffd25a';
         ctx.fillRect(Math.round(eb.x + zig), Math.round(eb.y), eb.w, eb.h / 2);
         ctx.fillRect(Math.round(eb.x - zig), Math.round(eb.y + eb.h / 2), eb.w, eb.h / 2);
+        ctx.fillStyle = '#fff6d0';
+        ctx.fillRect(Math.round(eb.x + zig) + 1, Math.round(eb.y) + 1, eb.w - 2, eb.h / 2 - 2);
     }
 
+    for (const l of G.lights) drawLight(l.x, l.y, l.size * (1 + (1 - l.life / l.total) * 0.6), l.color, l.life / l.total);
+    for (const r of G.rings) {
+        const a = clamp(r.life / r.total, 0, 1);
+        ctx.strokeStyle = rgba(r.color, a * 0.8);
+        ctx.lineWidth = 1 + a * 3;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Power-up capsules
     for (const pu of G.powerups) {
         const def = POWERUPS[pu.type];
         const bob = Math.sin(G.time * 6) * 2;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(Math.round(pu.x), Math.round(pu.y + bob), pu.w, pu.h);
+        const x = Math.round(pu.x), y = Math.round(pu.y + bob);
+        ctx.globalCompositeOperation = 'lighter';
+        drawLight(x + pu.w / 2, y + pu.h / 2, 56, def.color, 0.45 + 0.2 * Math.sin(G.time * 8));
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, y, pu.w, pu.h, 6); else ctx.rect(x, y, pu.w, pu.h);
+        ctx.fill();
         ctx.strokeStyle = def.color;
         ctx.lineWidth = 2;
-        ctx.strokeRect(Math.round(pu.x) + 1, Math.round(pu.y + bob) + 1, pu.w - 2, pu.h - 2);
-        text(def.letter, pu.x + pu.w / 2, pu.y + bob + pu.h / 2 + 1, 12, def.color);
+        ctx.stroke();
+        ctx.fillStyle = rgba('#ffffff', 0.25);
+        ctx.fillRect(x + 4, y + 3, pu.w - 8, 2);
+        text(def.letter, x + pu.w / 2, y + pu.h / 2 + 1, 12, def.color);
     }
 
+    // Particles: smoke normally, sparks and embers additively.
     for (const p of G.particles) {
-        ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+        if (!p.smoke) continue;
+        ctx.globalAlpha = clamp(p.life / p.max, 0, 1) * 0.6;
         ctx.fillStyle = p.color;
         ctx.fillRect(p.x, p.y, p.size, p.size);
     }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = 1.5;
+    for (const p of G.particles) {
+        if (p.smoke) continue;
+        ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+        if (p.spark) {
+            ctx.strokeStyle = p.color;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x - p.vx * 0.04, p.y - p.vy * 0.04);
+            ctx.stroke();
+        } else {
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+        }
+    }
+    ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
+
     for (const t of G.popups) {
         ctx.globalAlpha = clamp(t.life / Math.min(t.max, 1), 0, 1);
         text(t.text, t.x, t.y, 14, t.color);
@@ -1301,7 +1659,7 @@ function drawStartScreen() {
     ];
     rows.forEach(([spr, label, color], i) => {
         const y = 215 + i * 34;
-        ctx.drawImage(spr, W / 2 - 230 - spr.width / 2, y - spr.height / 2);
+        drawSprite(spr, W / 2 - 230 - spr.width / 2, y - spr.height / 2, 0.6);
         text(label, W / 2 - 190, y, 14, color, 'left');
     });
     Object.values(POWERUPS).forEach((def, i) => {
@@ -1387,8 +1745,7 @@ function drawOverlay() {
 }
 
 function drawScanlines() {
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    ctx.drawImage(CRT, 0, 0, W, H);
     if (G.flash > 0) {
         ctx.fillStyle = `rgba(255,220,180,${(G.flash * 0.35).toFixed(3)})`;
         ctx.fillRect(0, 0, W, H);
@@ -1399,7 +1756,7 @@ function draw() {
     ctx.save();
     ctx.clearRect(0, 0, W, H);
     if (G.shake > 0) ctx.translate(rand(-G.shake, G.shake) * 0.5, rand(-G.shake, G.shake) * 0.5);
-    drawStars();
+    drawBackground();
     if (G.state === 'start') {
         drawStartScreen();
     } else {
