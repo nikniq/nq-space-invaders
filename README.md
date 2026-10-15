@@ -43,3 +43,7 @@ Then open http://127.0.0.1:8000.
 *Graphics are currently SVG placeholders. For best results, replace with custom artwork.*
 # nq-space-invaders
 # nq-space-invaders
+
+## Deployment
+- `deploy.sh` runs **on the server** from the app root: `git pull`, `composer install` when the lockfile moved, cache rebuild, and a check that the game page and assets are in place.
+- `cx.sh` runs **locally** and drives the server over SSH: deploy, compare what's live, caches, health check, logs, artisan, maintenance mode, commit-and-push. Copy `vars.sh.example` to `vars.sh` (gitignored) and fill in the host details, then run `./cx.sh` for the menu.
