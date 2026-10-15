@@ -6,17 +6,24 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - Pixel-art sprites: three invader types (30/20/10 points) with two-frame animation, a mystery UFO worth 50–300, and a classic green cannon
 - Fleet marches in steps and speeds up as it thins; each wave starts faster and lower
 - Invaders fire back, with destructible bunkers to hide behind
-- Three lives, wave bonus, score popups, particle explosions and screen shake
-- WebAudio sound effects (shoot, hits, the four-note march, UFO warble) with a mute toggle
+- **Boss every fifth wave**: a large saucer with a health bar that sweeps the top of the screen firing three-way volleys
+- **Power-ups** dropped by dying invaders: Rapid fire (R), Spread shot (S), Shield (H), extra life (L)
+- **Combo multiplier** up to x4 for consecutive hits; missing a shot resets it
+- Three lives, bonus life every 1,500 points (max 5), respawn invincibility, wave bonus
+- Score popups, particle explosions, screen shake, CRT scanlines
+- WebAudio sound effects (shoot, hits, the four-note march, UFO warble, boss, power-ups) with a mute toggle
 - Start, pause, and game-over screens with instant restart; auto-pauses when the tab loses focus
-- High score saved in the browser
-- Scales to any screen; on-screen touch controls on phones and tablets
+- **Top-5 leaderboard** with three-letter initials, saved in the browser
+- Keyboard, gamepad and on-screen touch controls; scales to any screen; fullscreen toggle
 
 ## How to Play
-- **Left/Right** arrows (or **A/D**) move, **Space** fires
-- **Enter** starts or restarts, **P** or **Esc** pauses, **M** mutes
+- **Left/Right** arrows (or **A/D**) move, **Space** fires (hold for autofire with Rapid)
+- **Enter** starts or restarts, **P** or **Esc** pauses, **M** mutes, **F** toggles fullscreen
+- Gamepad: left stick or d-pad moves, A fires, Start pauses
 - On touch devices use the on-screen buttons; tap the game to start
 - Clear the fleet to advance; lose a life when hit, and the game ends if the invaders reach you
+- Catch falling capsules for power-ups; shoot the saucer for mystery points
+- Make the top five and you will be asked for your initials
 
 ## Project Layout
 This is a standard Laravel project with one difference: the web root is `public_html` instead of `public`

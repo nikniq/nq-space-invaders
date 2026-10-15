@@ -90,6 +90,18 @@ const PIX = {
         '...###....###...',
         '....#......#....',
     ],
+    boss: [
+        '........########........',
+        '.....##############.....',
+        '...##################...',
+        '..####################..',
+        '.###..####....####..###.',
+        '########################',
+        '########################',
+        '..##.####..##..####.##..',
+        '....##....####....##....',
+        '...#..............#.....',
+    ],
     burst: [
         '#..#..#..#',
         '.#..##..#.',
@@ -116,19 +128,23 @@ function renderSprite(rows, color, scale) {
 }
 
 const SCALE = 3;
+const COLORS = { squid: '#ffffff', crab: '#5ad7ff', octopus: '#ff6ad5', ufo: '#ff3b3b', player: '#3cff5a', boss: '#ff8c3b' };
 const SPR = {
-    player: renderSprite(PIX.player, '#3cff5a', SCALE),
-    squid: PIX.squid.map(f => renderSprite(f, '#ffffff', SCALE)),
-    crab: PIX.crab.map(f => renderSprite(f, '#5ad7ff', SCALE)),
-    octopus: PIX.octopus.map(f => renderSprite(f, '#ff6ad5', SCALE)),
-    ufo: renderSprite(PIX.ufo, '#ff3b3b', SCALE),
-    burst: renderSprite(PIX.burst, '#ffffff', SCALE),
+    player: renderSprite(PIX.player, COLORS.player, SCALE),
+    squid: PIX.squid.map(f => renderSprite(f, COLORS.squid, SCALE)),
+    crab: PIX.crab.map(f => renderSprite(f, COLORS.crab, SCALE)),
+    octopus: PIX.octopus.map(f => renderSprite(f, COLORS.octopus, SCALE)),
+    ufo: renderSprite(PIX.ufo, COLORS.ufo, SCALE),
+    boss: renderSprite(PIX.boss, COLORS.boss, SCALE + 1),
+    bossFlash: renderSprite(PIX.boss, '#ffffff', SCALE + 1),
+    burst: {},
 };
+for (const k of ['squid', 'crab', 'octopus', 'ufo', 'boss']) SPR.burst[k] = renderSprite(PIX.burst, COLORS[k], SCALE);
 
 const INVADER_TYPES = {
-    squid: { frames: SPR.squid, points: 30, color: '#ffffff' },
-    crab: { frames: SPR.crab, points: 20, color: '#5ad7ff' },
-    octopus: { frames: SPR.octopus, points: 10, color: '#ff6ad5' },
+    squid: { frames: SPR.squid, points: 30, color: COLORS.squid },
+    crab: { frames: SPR.crab, points: 20, color: COLORS.crab },
+    octopus: { frames: SPR.octopus, points: 10, color: COLORS.octopus },
 };
 const ROW_TYPES = ['squid', 'crab', 'crab', 'octopus', 'octopus'];
 const COLS = 11;
@@ -136,6 +152,18 @@ const COL_SPACING = 48;
 const ROW_SPACING = 40;
 const FLEET_STEP_X = 12;
 const FLEET_STEP_Y = 20;
+const BOSS_EVERY = 5;
+const MAX_LIVES = 5;
+const EXTRA_LIFE_EVERY = 1500;
+
+// Power-ups dropped by dying invaders.
+const POWERUPS = {
+    rapid: { letter: 'R', color: '#5ad7ff', label: 'RAPID FIRE', weight: 4, duration: 9 },
+    spread: { letter: 'S', color: '#ff6ad5', label: 'SPREAD SHOT', weight: 3, duration: 9 },
+    shield: { letter: 'H', color: '#3cff5a', label: 'SHIELD', weight: 3, duration: 20 },
+    life: { letter: 'L', color: '#ffd25a', label: '+1 LIFE', weight: 1, duration: 0 },
+};
+const POWERUP_DROP_CHANCE = 0.09;
 
 // ---------------------------------------------------------------------------
 // Sound — tiny WebAudio synth, created on first user gesture.
@@ -149,9 +177,9 @@ const Sound = {
             this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         } catch (e) { this.ctx = null; }
     },
-    tone(freq, dur, { type = 'square', vol = 0.08, slide = null } = {}) {
+    tone(freq, dur, { type = 'square', vol = 0.08, slide = null, delay = 0 } = {}) {
         if (!this.ctx || this.muted) return;
-        const t = this.ctx.currentTime;
+        const t = this.ctx.currentTime + delay;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = type;
@@ -169,10 +197,16 @@ const Sound = {
         this.tone(220, 0.6, { type: 'sawtooth', slide: 30, vol: 0.14 });
         this.tone(110, 0.8, { type: 'square', slide: 20, vol: 0.1 });
     },
+    shieldHit() { this.tone(300, 0.25, { type: 'triangle', slide: 900, vol: 0.1 }); },
     stepNote(i) { this.tone([110, 98, 87, 82][i % 4], 0.09, { type: 'triangle', vol: 0.12 }); },
     ufo() { this.tone(520, 0.14, { type: 'sine', slide: 720, vol: 0.05 }); },
     ufoHit() { this.tone(800, 0.3, { slide: 1600, vol: 0.09 }); },
-    wave() { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this.tone(f, 0.15, { vol: 0.08 }), i * 110)); },
+    bossHit() { this.tone(240, 0.08, { type: 'square', slide: 120, vol: 0.07 }); },
+    bossDie() { [100, 80, 60, 40].forEach((f, i) => this.tone(f, 0.5, { type: 'sawtooth', slide: 20, vol: 0.14, delay: i * 0.12 })); },
+    powerup() { [660, 880, 1320].forEach((f, i) => this.tone(f, 0.1, { type: 'triangle', vol: 0.09, delay: i * 0.07 })); },
+    extraLife() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.14, { vol: 0.09, delay: i * 0.1 })); },
+    wave() { [440, 554, 659, 880].forEach((f, i) => this.tone(f, 0.15, { vol: 0.08, delay: i * 0.11 })); },
+    blip() { this.tone(1200, 0.05, { type: 'square', vol: 0.04 }); },
 };
 
 // ---------------------------------------------------------------------------
@@ -247,7 +281,7 @@ class Bunker {
         }
     }
     draw() {
-        ctx.fillStyle = '#3cff5a';
+        ctx.fillStyle = COLORS.player;
         for (let r = 0; r < this.rows; r++) {
             for (let c = 0; c < this.cols; c++) {
                 if (this.cells[r * this.cols + c]) ctx.fillRect(this.x + c * CELL, this.y + r * CELL, CELL, CELL);
@@ -257,34 +291,50 @@ class Bunker {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers + persistence
 // ---------------------------------------------------------------------------
 function overlaps(a, b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+function pad(n) { return String(n).padStart(6, '0'); }
 
-const HISCORE_KEY = 'nq-space-invaders-hiscore';
-function loadHiScore() {
-    try { return parseInt(localStorage.getItem(HISCORE_KEY), 10) || 0; } catch (e) { return 0; }
+const SCORES_KEY = 'nq-space-invaders-scores';
+const LEGACY_HI_KEY = 'nq-space-invaders-hiscore';
+const BOARD_SIZE = 5;
+function loadScores() {
+    let list = [];
+    try {
+        list = JSON.parse(localStorage.getItem(SCORES_KEY) || '[]');
+        if (!Array.isArray(list)) list = [];
+        // Carry over a high score saved by the previous version.
+        const legacy = parseInt(localStorage.getItem(LEGACY_HI_KEY), 10) || 0;
+        if (legacy > 0 && !list.length) list.push({ name: '---', score: legacy, wave: 0 });
+    } catch (e) { list = []; }
+    return list.filter(e => e && typeof e.score === 'number').sort((a, b) => b.score - a.score).slice(0, BOARD_SIZE);
 }
-function saveHiScore(v) {
-    try { localStorage.setItem(HISCORE_KEY, String(v)); } catch (e) { /* ignore */ }
+function saveScores(list) {
+    try { localStorage.setItem(SCORES_KEY, JSON.stringify(list)); } catch (e) { /* ignore */ }
+}
+function qualifies(score) {
+    return score > 0 && (G.scores.length < BOARD_SIZE || score > G.scores[G.scores.length - 1].score);
 }
 
 // ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
 const G = {
-    state: 'start', // start | playing | paused | dying | wavecleared | gameover
+    state: 'start', // start | playing | paused | dying | wavecleared | entername | gameover
     score: 0,
-    hiScore: loadHiScore(),
+    scores: loadScores(),
+    hiScore: 0,
     newHiScore: false,
     lives: 3,
+    nextLifeAt: EXTRA_LIFE_EVERY,
     wave: 1,
     player: null,
-    playerBullet: null,
+    playerBullets: [],
     enemyBullets: [],
     invaders: [],
     fleetDir: 1,
@@ -294,14 +344,26 @@ const G = {
     enemyFireTimer: 0,
     ufo: null,
     ufoTimer: 0,
+    boss: null,
     bunkers: [],
+    powerups: [],
+    power: { type: null, timer: 0 },
+    shield: 0, // seconds of shield remaining
+    combo: 0,
+    comboBest: 0,
+    corpses: [],
     particles: [],
     popups: [],
     stars: [],
     stateTimer: 0,
     shake: 0,
+    flash: 0,
     time: 0,
+    name: ['A', 'A', 'A'],
+    nameIdx: 0,
+    lastEntry: null,
 };
+G.hiScore = G.scores.length ? G.scores[0].score : 0;
 
 const input = { left: false, right: false, fire: false, firePressed: false };
 
@@ -309,16 +371,20 @@ for (let i = 0; i < 90; i++) {
     G.stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.4 + 0.3, p: Math.random() * Math.PI * 2 });
 }
 
+function multiplier() { return 1 + Math.min(3, Math.floor(G.combo / 5)); }
+function isBossWave(w = G.wave) { return w % BOSS_EVERY === 0; }
+
 function makePlayer() {
-    return { x: W / 2 - SPR.player.width / 2, y: H - 70, w: SPR.player.width, h: SPR.player.height, speed: 260 };
+    return { x: W / 2 - SPR.player.width / 2, y: H - 70, w: SPR.player.width, h: SPR.player.height, speed: 260, invuln: 2.0 };
 }
 
 function makeFleet() {
     const invaders = [];
+    const rows = isBossWave() ? ['crab', 'octopus'] : ROW_TYPES;
     const fleetW = (COLS - 1) * COL_SPACING;
     const startX = (W - fleetW) / 2;
-    const startY = 80 + Math.min(G.wave - 1, 4) * 12;
-    ROW_TYPES.forEach((type, r) => {
+    const startY = (isBossWave() ? 180 : 80) + Math.min(G.wave - 1, 4) * 12;
+    rows.forEach((type, r) => {
         const spr = INVADER_TYPES[type].frames[0];
         for (let c = 0; c < COLS; c++) {
             invaders.push({
@@ -336,6 +402,14 @@ function makeFleet() {
     return invaders;
 }
 
+function makeBoss() {
+    const hp = 12 + G.wave * 2;
+    return {
+        x: W / 2 - SPR.boss.width / 2, y: 70, w: SPR.boss.width, h: SPR.boss.height,
+        hp, maxHp: hp, t: 0, fireTimer: 2.5, flash: 0, points: 1000 + (G.wave / BOSS_EVERY - 1) * 500,
+    };
+}
+
 function makeBunkers() {
     const bunkers = [];
     const bw = BUNKER_SHAPE[0].length * CELL;
@@ -348,26 +422,37 @@ function startGame() {
     G.score = 0;
     G.newHiScore = false;
     G.lives = 3;
+    G.nextLifeAt = EXTRA_LIFE_EVERY;
     G.wave = 1;
+    G.combo = 0;
+    G.comboBest = 0;
     G.player = makePlayer();
     G.bunkers = makeBunkers();
     G.particles = [];
     G.popups = [];
+    G.corpses = [];
+    G.powerups = [];
+    G.power = { type: null, timer: 0 };
+    G.shield = 0;
+    G.lastEntry = null;
     startWave();
     G.state = 'playing';
 }
 
 function startWave() {
     G.invaders = makeFleet();
+    G.boss = isBossWave() ? makeBoss() : null;
     G.fleetDir = 1;
     G.fleetTimer = 0;
     G.fleetFrame = 0;
-    G.playerBullet = null;
+    G.playerBullets = [];
     G.enemyBullets = [];
+    G.powerups = [];
     G.enemyFireTimer = 1.5;
     G.ufo = null;
     G.ufoTimer = rand(12, 20);
     if (G.wave > 1) G.bunkers = makeBunkers();
+    if (G.boss) popup(W / 2, H / 2 - 40, 'BOSS WAVE', COLORS.boss, 2.5);
 }
 
 function addScore(n) {
@@ -375,7 +460,14 @@ function addScore(n) {
     if (G.score > G.hiScore) {
         G.hiScore = G.score;
         G.newHiScore = true;
-        saveHiScore(G.hiScore);
+    }
+    while (G.score >= G.nextLifeAt) {
+        G.nextLifeAt += EXTRA_LIFE_EVERY;
+        if (G.lives < MAX_LIVES) {
+            G.lives += 1;
+            popup(W / 2, H - 60, 'EXTRA LIFE', POWERUPS.life.color, 1.6);
+            Sound.extraLife();
+        }
     }
 }
 
@@ -387,8 +479,64 @@ function burst(x, y, color, n = 14, speed = 160) {
     }
 }
 
-function popup(x, y, text, color = '#fff') {
-    G.popups.push({ x, y, text, color, life: 1.0 });
+function popup(x, y, text, color = '#fff', life = 1.0) {
+    G.popups.push({ x, y, text, color, life, max: life });
+}
+
+function dropPowerup(x, y) {
+    if (Math.random() > POWERUP_DROP_CHANCE) return;
+    const total = Object.values(POWERUPS).reduce((s, p) => s + p.weight, 0);
+    let r = Math.random() * total;
+    let type = 'rapid';
+    for (const [k, p] of Object.entries(POWERUPS)) { r -= p.weight; if (r <= 0) { type = k; break; } }
+    if (type === 'life' && G.lives >= MAX_LIVES) type = 'shield';
+    G.powerups.push({ type, x: x - 11, y, w: 22, h: 22, vy: 95 });
+}
+
+function applyPowerup(type) {
+    const def = POWERUPS[type];
+    Sound.powerup();
+    popup(G.player.x + G.player.w / 2, G.player.y - 20, def.label, def.color, 1.4);
+    if (type === 'life') {
+        G.lives = Math.min(MAX_LIVES, G.lives + 1);
+    } else if (type === 'shield') {
+        G.shield = def.duration;
+    } else {
+        G.power = { type, timer: def.duration };
+    }
+}
+
+function fire() {
+    const p = G.player;
+    const maxShots = G.power.type === 'rapid' ? 3 : 1;
+    if (G.playerBullets.length >= maxShots) return;
+    const mk = (dx, vx) => ({ x: p.x + p.w / 2 - 2 + dx, y: p.y - 12, w: 4, h: 12, vx, vy: -560 });
+    if (G.power.type === 'spread') {
+        if (G.playerBullets.length) return;
+        G.playerBullets.push(mk(0, 0), mk(-6, -170), mk(6, 170));
+    } else {
+        G.playerBullets.push(mk(0, 0));
+    }
+    Sound.shoot();
+}
+
+function killInvader(inv) {
+    inv.alive = false;
+    G.combo += 1;
+    G.comboBest = Math.max(G.comboBest, G.combo);
+    const pts = INVADER_TYPES[inv.type].points * multiplier();
+    addScore(pts);
+    const cx = inv.x + inv.w / 2, cy = inv.y + inv.h / 2;
+    G.corpses.push({ x: cx - SPR.burst[inv.type].width / 2, y: cy - SPR.burst[inv.type].height / 2, spr: SPR.burst[inv.type], life: 0.22 });
+    burst(cx, cy, INVADER_TYPES[inv.type].color, 10);
+    popup(cx, inv.y, multiplier() > 1 ? pts + ' x' + multiplier() : String(pts), INVADER_TYPES[inv.type].color);
+    dropPowerup(cx, cy);
+    Sound.invaderHit();
+}
+
+function missShot() {
+    if (G.combo >= 5) popup(G.player.x + G.player.w / 2, G.player.y - 30, 'COMBO LOST', '#888', 0.8);
+    G.combo = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,11 +550,16 @@ function fleetInterval(aliveCount) {
     return Math.max(0.035, base * Math.pow(aliveCount / total, 0.8) + 0.03);
 }
 
+function spawnEnemyBullet(x, y, vx, vy) {
+    G.enemyBullets.push({ x: x - 2, y, w: 4, h: 14, vx, vy, wobble: Math.random() * 10 });
+}
+
 function update(dt) {
     G.time += dt;
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
+    if (G.flash > 0) G.flash = Math.max(0, G.flash - dt * 4);
 
-    // Particles and popups run in every state so explosions finish.
+    // Cosmetics run in every state so explosions finish.
     for (const p of G.particles) {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
@@ -416,12 +569,14 @@ function update(dt) {
     G.particles = G.particles.filter(p => p.life > 0);
     for (const t of G.popups) { t.life -= dt; t.y -= 24 * dt; }
     G.popups = G.popups.filter(t => t.life > 0);
+    for (const c of G.corpses) c.life -= dt;
+    G.corpses = G.corpses.filter(c => c.life > 0);
 
     if (G.state === 'dying') {
         G.stateTimer -= dt;
         if (G.stateTimer <= 0) {
             if (G.lives <= 0) {
-                G.state = 'gameover';
+                endGame();
             } else {
                 G.player = makePlayer();
                 G.enemyBullets = [];
@@ -442,117 +597,143 @@ function update(dt) {
     if (G.state !== 'playing') return;
 
     const player = G.player;
+    if (player.invuln > 0) player.invuln -= dt;
+
+    // Power-up timer
+    if (G.power.type && G.power.timer > 0) {
+        G.power.timer -= dt;
+        if (G.power.timer <= 0) G.power = { type: null, timer: 0 };
+    }
+    if (G.shield > 0) G.shield = Math.max(0, G.shield - dt);
 
     // Player movement
     if (input.left) player.x -= player.speed * dt;
     if (input.right) player.x += player.speed * dt;
     player.x = clamp(player.x, 8, W - player.w - 8);
 
-    // Player fire — one bullet on screen at a time, edge-triggered.
-    if (input.firePressed && !G.playerBullet) {
-        G.playerBullet = { x: player.x + player.w / 2 - 2, y: player.y - 12, w: 4, h: 12, vy: -560 };
-        Sound.shoot();
-    }
+    // Player fire — edge-triggered; rapid fire also autofires while held.
+    if (input.firePressed || (G.power.type === 'rapid' && input.fire)) fire();
     input.firePressed = false;
 
-    // Player bullet
-    if (G.playerBullet) {
-        const b = G.playerBullet;
+    // Player bullets
+    for (const b of G.playerBullets) {
         b.y += b.vy * dt;
-        let gone = b.y + b.h < 0;
-        if (!gone) {
-            for (const inv of G.invaders) {
-                if (inv.alive && overlaps(b, inv)) {
-                    inv.alive = false;
-                    const pts = INVADER_TYPES[inv.type].points;
-                    addScore(pts);
-                    burst(inv.x + inv.w / 2, inv.y + inv.h / 2, INVADER_TYPES[inv.type].color);
-                    popup(inv.x + inv.w / 2, inv.y, String(pts), INVADER_TYPES[inv.type].color);
-                    Sound.invaderHit();
-                    gone = true;
-                    break;
-                }
-            }
+        b.x += b.vx * dt;
+        if (b.y + b.h < 0 || b.x < -10 || b.x > W + 10) { b.dead = true; missShot(); continue; }
+        for (const inv of G.invaders) {
+            if (inv.alive && overlaps(b, inv)) { killInvader(inv); b.dead = true; break; }
         }
-        if (!gone && G.ufo && overlaps(b, G.ufo)) {
-            addScore(G.ufo.points);
-            burst(G.ufo.x + G.ufo.w / 2, G.ufo.y + G.ufo.h / 2, '#ff3b3b', 30, 240);
-            popup(G.ufo.x + G.ufo.w / 2, G.ufo.y, String(G.ufo.points), '#ff3b3b');
+        if (b.dead) continue;
+        if (G.boss && overlaps(b, G.boss)) {
+            b.dead = true;
+            G.boss.hp -= 1;
+            G.boss.flash = 0.08;
+            G.combo += 1;
+            burst(b.x, b.y, COLORS.boss, 5, 100);
+            Sound.bossHit();
+            if (G.boss.hp <= 0) killBoss();
+            continue;
+        }
+        if (G.ufo && overlaps(b, G.ufo)) {
+            const pts = G.ufo.points * multiplier();
+            G.combo += 1;
+            addScore(pts);
+            G.corpses.push({ x: G.ufo.x + G.ufo.w / 2 - SPR.burst.ufo.width / 2, y: G.ufo.y, spr: SPR.burst.ufo, life: 0.3 });
+            burst(G.ufo.x + G.ufo.w / 2, G.ufo.y + G.ufo.h / 2, COLORS.ufo, 30, 240);
+            popup(G.ufo.x + G.ufo.w / 2, G.ufo.y, String(pts), COLORS.ufo, 1.4);
             Sound.ufoHit();
             G.ufo = null;
-            gone = true;
+            b.dead = true;
+            continue;
         }
-        if (!gone) {
-            for (const bk of G.bunkers) {
-                if (bk.hit(b, 2)) { gone = true; break; }
+        for (const bk of G.bunkers) {
+            if (bk.hit(b, 2)) { b.dead = true; missShot(); break; }
+        }
+        if (b.dead) continue;
+        for (const eb of G.enemyBullets) {
+            if (!eb.dead && overlaps(b, eb)) {
+                eb.dead = true;
+                b.dead = true;
+                burst(b.x, b.y, '#ffd25a', 6, 80);
+                break;
             }
         }
-        if (!gone) {
-            for (const eb of G.enemyBullets) {
-                if (overlaps(b, eb)) {
-                    eb.dead = true;
-                    gone = true;
-                    burst(b.x, b.y, '#ffd25a', 6, 80);
-                    break;
-                }
-            }
-        }
-        if (gone) G.playerBullet = null;
     }
+    G.playerBullets = G.playerBullets.filter(b => !b.dead);
 
     // Fleet movement — stepwise like the arcade original.
     const alive = aliveInvaders();
-    G.fleetTimer += dt;
-    const interval = fleetInterval(alive.length);
-    if (G.fleetTimer >= interval) {
-        G.fleetTimer -= interval;
-        G.fleetFrame ^= 1;
-        Sound.stepNote(G.stepNote++);
-        let minX = Infinity, maxX = -Infinity;
-        for (const inv of alive) {
-            minX = Math.min(minX, inv.x);
-            maxX = Math.max(maxX, inv.x + inv.w);
+    if (alive.length) {
+        G.fleetTimer += dt;
+        const interval = fleetInterval(alive.length);
+        if (G.fleetTimer >= interval) {
+            G.fleetTimer -= interval;
+            G.fleetFrame ^= 1;
+            Sound.stepNote(G.stepNote++);
+            let minX = Infinity, maxX = -Infinity;
+            for (const inv of alive) {
+                minX = Math.min(minX, inv.x);
+                maxX = Math.max(maxX, inv.x + inv.w);
+            }
+            const nextMin = minX + G.fleetDir * FLEET_STEP_X;
+            const nextMax = maxX + G.fleetDir * FLEET_STEP_X;
+            if (nextMin < 10 || nextMax > W - 10) {
+                G.fleetDir *= -1;
+                for (const inv of G.invaders) inv.y += FLEET_STEP_Y;
+            } else {
+                for (const inv of G.invaders) inv.x += G.fleetDir * FLEET_STEP_X;
+            }
+            for (const inv of alive) {
+                for (const bk of G.bunkers) bk.crush(inv);
+                if (inv.y + inv.h >= player.y) { killPlayer(true); return; }
+            }
         }
-        const nextMin = minX + G.fleetDir * FLEET_STEP_X;
-        const nextMax = maxX + G.fleetDir * FLEET_STEP_X;
-        if (nextMin < 10 || nextMax > W - 10) {
-            G.fleetDir *= -1;
-            for (const inv of G.invaders) inv.y += FLEET_STEP_Y;
-        } else {
-            for (const inv of G.invaders) inv.x += G.fleetDir * FLEET_STEP_X;
-        }
-        for (const inv of alive) {
-            for (const bk of G.bunkers) bk.crush(inv);
-            if (inv.y + inv.h >= player.y) { killPlayer(true); return; }
+
+        // Enemy fire — bottom-most invader of a random column.
+        G.enemyFireTimer -= dt;
+        const maxEnemyBullets = Math.min(3 + Math.floor(G.wave / 2), 6);
+        if (G.enemyFireTimer <= 0 && G.enemyBullets.length < maxEnemyBullets) {
+            const cols = {};
+            for (const inv of alive) {
+                if (!cols[inv.col] || inv.y > cols[inv.col].y) cols[inv.col] = inv;
+            }
+            const shooters = Object.values(cols);
+            let shooter;
+            if (Math.random() < 0.35) {
+                shooter = shooters.reduce((best, s) => (
+                    Math.abs(s.x - player.x) < Math.abs(best.x - player.x) ? s : best
+                ), shooters[0]);
+            } else {
+                shooter = shooters[Math.floor(Math.random() * shooters.length)];
+            }
+            spawnEnemyBullet(shooter.x + shooter.w / 2, shooter.y + shooter.h, 0, 170 + G.wave * 15);
+            G.enemyFireTimer = Math.max(0.35, rand(0.9, 1.5) - G.wave * 0.07);
         }
     }
 
-    // Enemy fire — bottom-most invader of a random column.
-    G.enemyFireTimer -= dt;
-    const maxEnemyBullets = Math.min(3 + Math.floor(G.wave / 2), 6);
-    if (G.enemyFireTimer <= 0 && G.enemyBullets.length < maxEnemyBullets && alive.length) {
-        const cols = {};
-        for (const inv of alive) {
-            if (!cols[inv.col] || inv.y > cols[inv.col].y) cols[inv.col] = inv;
+    // Boss
+    if (G.boss) {
+        const bs = G.boss;
+        bs.t += dt;
+        bs.x = W / 2 - bs.w / 2 + Math.sin(bs.t * 0.9) * (W / 2 - bs.w / 2 - 30);
+        bs.y = 70 + Math.sin(bs.t * 2.3) * 14;
+        if (bs.flash > 0) bs.flash -= dt;
+        bs.fireTimer -= dt;
+        if (bs.fireTimer <= 0) {
+            const cx = bs.x + bs.w / 2, cy = bs.y + bs.h;
+            const toPlayer = clamp((player.x + player.w / 2 - cx) * 0.7, -220, 220);
+            spawnEnemyBullet(cx, cy, toPlayer, 200);
+            spawnEnemyBullet(cx - 20, cy, toPlayer - 110, 190);
+            spawnEnemyBullet(cx + 20, cy, toPlayer + 110, 190);
+            bs.fireTimer = Math.max(0.9, 2.2 - G.wave * 0.05) * (bs.hp < bs.maxHp / 3 ? 0.6 : 1);
         }
-        const shooters = Object.values(cols);
-        // Prefer a shooter near the player some of the time, so dodging matters.
-        let shooter;
-        if (Math.random() < 0.35) {
-            shooter = shooters.reduce((best, s) => (
-                Math.abs(s.x - player.x) < Math.abs(best.x - player.x) ? s : best
-            ), shooters[0]);
-        } else {
-            shooter = shooters[Math.floor(Math.random() * shooters.length)];
-        }
-        G.enemyBullets.push({ x: shooter.x + shooter.w / 2 - 2, y: shooter.y + shooter.h, w: 4, h: 14, vy: 170 + G.wave * 15, wobble: Math.random() * 10 });
-        G.enemyFireTimer = Math.max(0.35, rand(0.9, 1.5) - G.wave * 0.07);
     }
 
     // Enemy bullets
     for (const eb of G.enemyBullets) {
         eb.y += eb.vy * dt;
-        if (eb.y > H) eb.dead = true;
+        eb.x += (eb.vx || 0) * dt;
+        if (eb.y > H || eb.x < -20 || eb.x > W + 20) eb.dead = true;
         if (!eb.dead) {
             for (const bk of G.bunkers) {
                 if (bk.hit(eb, 2)) { eb.dead = true; break; }
@@ -560,11 +741,28 @@ function update(dt) {
         }
         if (!eb.dead && overlaps(eb, player)) {
             eb.dead = true;
+            if (player.invuln > 0) continue;
+            if (G.shield > 0) {
+                G.shield = 0;
+                burst(player.x + player.w / 2, player.y, POWERUPS.shield.color, 20, 200);
+                popup(player.x + player.w / 2, player.y - 20, 'SHIELD DOWN', POWERUPS.shield.color);
+                Sound.shieldHit();
+                player.invuln = 0.6;
+                continue;
+            }
             killPlayer(false);
             return;
         }
     }
     G.enemyBullets = G.enemyBullets.filter(b => !b.dead);
+
+    // Power-up capsules
+    for (const pu of G.powerups) {
+        pu.y += pu.vy * dt;
+        if (pu.y > H) pu.dead = true;
+        else if (overlaps(pu, player)) { pu.dead = true; applyPowerup(pu.type); }
+    }
+    G.powerups = G.powerups.filter(p => !p.dead);
 
     // UFO
     if (G.ufo) {
@@ -572,7 +770,7 @@ function update(dt) {
         G.ufo.soundTimer -= dt;
         if (G.ufo.soundTimer <= 0) { Sound.ufo(); G.ufo.soundTimer = 0.18; }
         if (G.ufo.x < -G.ufo.w - 10 || G.ufo.x > W + 10) G.ufo = null;
-    } else {
+    } else if (!G.boss) {
         G.ufoTimer -= dt;
         if (G.ufoTimer <= 0 && alive.length >= 8) {
             const fromLeft = Math.random() < 0.5;
@@ -590,27 +788,87 @@ function update(dt) {
     }
 
     // Wave cleared
-    if (alive.length === 0) {
+    if (alive.length === 0 && !G.boss) {
         G.state = 'wavecleared';
         G.stateTimer = 2.0;
-        G.playerBullet = null;
+        G.playerBullets = [];
         G.enemyBullets = [];
         G.ufo = null;
         addScore(100 * G.wave);
-        popup(W / 2, H / 2 + 40, 'WAVE BONUS ' + (100 * G.wave), '#ffd25a');
+        popup(W / 2, H / 2 + 40, 'WAVE BONUS ' + (100 * G.wave), '#ffd25a', 1.8);
         Sound.wave();
     }
 }
 
+function killBoss() {
+    const bs = G.boss;
+    const pts = bs.points;
+    addScore(pts);
+    burst(bs.x + bs.w / 2, bs.y + bs.h / 2, COLORS.boss, 80, 320);
+    burst(bs.x + bs.w / 2, bs.y + bs.h / 2, '#fff', 30, 200);
+    G.corpses.push({ x: bs.x + bs.w / 2 - SPR.burst.boss.width / 2, y: bs.y + bs.h / 2 - SPR.burst.boss.height / 2, spr: SPR.burst.boss, life: 0.5 });
+    popup(bs.x + bs.w / 2, bs.y, String(pts), COLORS.boss, 2);
+    G.shake = 14;
+    G.flash = 1;
+    G.boss = null;
+    Sound.bossDie();
+}
+
 function killPlayer(invaded) {
     const p = G.player;
-    burst(p.x + p.w / 2, p.y + p.h / 2, '#3cff5a', 40, 260);
+    burst(p.x + p.w / 2, p.y + p.h / 2, COLORS.player, 40, 260);
     Sound.playerHit();
     G.shake = 8;
     G.lives -= invaded ? G.lives : 1;
-    G.playerBullet = null;
+    G.playerBullets = [];
+    G.combo = 0;
+    G.shield = 0;
+    G.power = { type: null, timer: 0 };
     G.state = 'dying';
     G.stateTimer = 1.6;
+}
+
+function endGame() {
+    if (qualifies(G.score)) {
+        G.name = G.lastEntry ? [...G.lastEntry] : ['A', 'A', 'A'];
+        G.nameIdx = 0;
+        G.state = 'entername';
+    } else {
+        G.state = 'gameover';
+    }
+}
+
+function commitName() {
+    const name = G.name.join('');
+    G.lastEntry = [...G.name];
+    G.scores.push({ name, score: G.score, wave: G.wave });
+    G.scores.sort((a, b) => b.score - a.score);
+    G.scores = G.scores.slice(0, BOARD_SIZE);
+    saveScores(G.scores);
+    G.hiScore = G.scores[0].score;
+    G.state = 'gameover';
+    Sound.wave();
+}
+
+// Name entry: letters type directly; left/right cycle; fire/enter advance.
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-';
+function nameCycle(dir) {
+    const i = ALPHABET.indexOf(G.name[G.nameIdx]);
+    G.name[G.nameIdx] = ALPHABET[(i + dir + ALPHABET.length) % ALPHABET.length];
+    Sound.blip();
+}
+function nameAdvance() {
+    Sound.blip();
+    if (G.nameIdx >= 2) commitName();
+    else G.nameIdx += 1;
+}
+function nameType(ch) {
+    G.name[G.nameIdx] = ch;
+    nameAdvance();
+}
+function nameBack() {
+    if (G.nameIdx > 0) G.nameIdx -= 1;
+    Sound.blip();
 }
 
 // ---------------------------------------------------------------------------
@@ -636,20 +894,62 @@ function drawStars() {
 
 function drawHud() {
     text('SCORE', 24, 20, 12, '#9ad', 'left');
-    text(String(G.score).padStart(6, '0'), 24, 40, 18, '#fff', 'left');
+    text(pad(G.score), 24, 40, 18, '#fff', 'left');
     text('HI-SCORE', W / 2, 20, 12, '#9ad');
-    text(String(G.hiScore).padStart(6, '0'), W / 2, 40, 18, G.newHiScore ? '#ffd25a' : '#fff');
+    text(pad(G.hiScore), W / 2, 40, 18, G.newHiScore ? '#ffd25a' : '#fff');
     text('WAVE', W - 24, 20, 12, '#9ad', 'right');
     text(String(G.wave), W - 24, 40, 18, '#fff', 'right');
 
+    if (multiplier() > 1) {
+        text('COMBO x' + multiplier(), 24, 62, 12, '#ffd25a', 'left');
+    }
+
+    // Active power-up bars (timed weapon, then shield)
+    let barY = 62;
+    const bar = (def, frac) => {
+        text(def.label, W - 24, barY, 10, def.color, 'right');
+        ctx.fillStyle = '#222';
+        ctx.fillRect(W - 24 - 120, barY + 8, 120, 5);
+        ctx.fillStyle = def.color;
+        ctx.fillRect(W - 24 - 120, barY + 8, 120 * clamp(frac, 0, 1), 5);
+        barY += 20;
+    };
+    if (G.power.type && G.power.timer > 0) bar(POWERUPS[G.power.type], G.power.timer / POWERUPS[G.power.type].duration);
+    if (G.shield > 0) bar(POWERUPS.shield, G.shield / POWERUPS.shield.duration);
+
+    // Boss health
+    if (G.boss) {
+        const bw = 240;
+        ctx.fillStyle = '#222';
+        ctx.fillRect(W / 2 - bw / 2, 58, bw, 8);
+        ctx.fillStyle = COLORS.boss;
+        ctx.fillRect(W / 2 - bw / 2, 58, bw * clamp(G.boss.hp / G.boss.maxHp, 0, 1), 8);
+    }
+
     // Lives + ground line
-    ctx.fillStyle = '#3cff5a';
+    ctx.fillStyle = COLORS.player;
     ctx.fillRect(0, H - 28, W, 2);
-    text(String(G.lives), 24, H - 14, 14, '#3cff5a', 'left');
+    text(String(G.lives), 24, H - 14, 14, COLORS.player, 'left');
     for (let i = 0; i < Math.max(0, G.lives - 1); i++) {
         ctx.drawImage(SPR.player, 48 + i * 34, H - 24, SPR.player.width * 0.6, SPR.player.height * 0.6);
     }
     if (Sound.muted) text('MUTED', W - 24, H - 14, 12, '#888', 'right');
+}
+
+function drawPlayer() {
+    const p = G.player;
+    if (G.state === 'dying') return;
+    if (p.invuln > 0 && Math.floor(G.time * 12) % 2 === 0) return;
+    ctx.drawImage(SPR.player, Math.round(p.x), p.y);
+    if (G.shield > 0) {
+        ctx.strokeStyle = POWERUPS.shield.color;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(G.time * 8);
+        ctx.beginPath();
+        ctx.ellipse(p.x + p.w / 2, p.y + p.h / 2 + 2, p.w / 2 + 10, p.h / 2 + 10, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
 }
 
 function drawPlayfield() {
@@ -657,19 +957,32 @@ function drawPlayfield() {
     for (const inv of G.invaders) {
         if (inv.alive) ctx.drawImage(INVADER_TYPES[inv.type].frames[G.fleetFrame], Math.round(inv.x), Math.round(inv.y));
     }
+    for (const c of G.corpses) ctx.drawImage(c.spr, Math.round(c.x), Math.round(c.y));
     if (G.ufo) ctx.drawImage(SPR.ufo, Math.round(G.ufo.x), G.ufo.y);
-    if (G.state !== 'dying') ctx.drawImage(SPR.player, Math.round(G.player.x), G.player.y);
-    if (G.playerBullet) {
-        ctx.fillStyle = '#e8ffe8';
-        ctx.fillRect(Math.round(G.playerBullet.x), Math.round(G.playerBullet.y), G.playerBullet.w, G.playerBullet.h);
-    }
+    if (G.boss) ctx.drawImage(G.boss.flash > 0 ? SPR.bossFlash : SPR.boss, Math.round(G.boss.x), Math.round(G.boss.y));
+    drawPlayer();
+
+    ctx.fillStyle = '#e8ffe8';
+    for (const b of G.playerBullets) ctx.fillRect(Math.round(b.x), Math.round(b.y), b.w, b.h);
+
     ctx.fillStyle = '#ffd25a';
     for (const eb of G.enemyBullets) {
-        // Zig-zag bolt
         const zig = Math.sin(G.time * 30 + eb.wobble) > 0 ? 2 : -2;
         ctx.fillRect(Math.round(eb.x + zig), Math.round(eb.y), eb.w, eb.h / 2);
         ctx.fillRect(Math.round(eb.x - zig), Math.round(eb.y + eb.h / 2), eb.w, eb.h / 2);
     }
+
+    for (const pu of G.powerups) {
+        const def = POWERUPS[pu.type];
+        const bob = Math.sin(G.time * 6) * 2;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(Math.round(pu.x), Math.round(pu.y + bob), pu.w, pu.h);
+        ctx.strokeStyle = def.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(Math.round(pu.x) + 1, Math.round(pu.y + bob) + 1, pu.w - 2, pu.h - 2);
+        text(def.letter, pu.x + pu.w / 2, pu.y + bob + pu.h / 2 + 1, 12, def.color);
+    }
+
     for (const p of G.particles) {
         ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
         ctx.fillStyle = p.color;
@@ -677,7 +990,7 @@ function drawPlayfield() {
     }
     ctx.globalAlpha = 1;
     for (const t of G.popups) {
-        ctx.globalAlpha = clamp(t.life, 0, 1);
+        ctx.globalAlpha = clamp(t.life / Math.min(t.max, 1), 0, 1);
         text(t.text, t.x, t.y, 14, t.color);
     }
     ctx.globalAlpha = 1;
@@ -688,27 +1001,68 @@ function dim(alpha = 0.7) {
     ctx.fillRect(0, 0, W, H);
 }
 
+function drawScoreboard(y, highlight) {
+    text('TOP SCORES', W / 2, y, 14, '#9ad');
+    if (!G.scores.length) { text('NO SCORES YET', W / 2, y + 30, 12, '#666'); return; }
+    G.scores.forEach((e, i) => {
+        const rowY = y + 28 + i * 22;
+        const hl = highlight && e === highlight;
+        const color = hl ? '#ffd25a' : '#fff';
+        text(String(i + 1) + '.', W / 2 - 150, rowY, 12, color, 'left');
+        text(e.name, W / 2 - 110, rowY, 12, color, 'left');
+        text(pad(e.score), W / 2 + 60, rowY, 12, color, 'right');
+        text(e.wave ? 'W' + e.wave : '', W / 2 + 150, rowY, 12, '#9ad', 'right');
+    });
+}
+
 function drawStartScreen() {
     dim(0.55);
-    text('SPACE', W / 2, 120, 56, '#3cff5a');
-    text('INVADERS', W / 2, 185, 56, '#3cff5a');
+    text('SPACE', W / 2, 90, 56, COLORS.player);
+    text('INVADERS', W / 2, 155, 56, COLORS.player);
 
     const rows = [
-        [SPR.ufo, '= ? MYSTERY', '#ff3b3b'],
-        [SPR.squid[0], '= 30 POINTS', '#fff'],
-        [SPR.crab[0], '= 20 POINTS', '#5ad7ff'],
-        [SPR.octopus[0], '= 10 POINTS', '#ff6ad5'],
+        [SPR.ufo, '= ? MYSTERY', COLORS.ufo],
+        [SPR.squid[0], '= 30 POINTS', COLORS.squid],
+        [SPR.crab[0], '= 20 POINTS', COLORS.crab],
+        [SPR.octopus[0], '= 10 POINTS', COLORS.octopus],
     ];
     rows.forEach(([spr, label, color], i) => {
-        const y = 260 + i * 40;
-        ctx.drawImage(spr, W / 2 - 90 - spr.width / 2, y - spr.height / 2);
-        text(label, W / 2 - 40, y, 16, color, 'left');
+        const y = 215 + i * 34;
+        ctx.drawImage(spr, W / 2 - 230 - spr.width / 2, y - spr.height / 2);
+        text(label, W / 2 - 190, y, 14, color, 'left');
+    });
+    Object.values(POWERUPS).forEach((def, i) => {
+        const y = 215 + i * 34;
+        ctx.strokeStyle = def.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(W / 2 + 40, y - 10, 20, 20);
+        text(def.letter, W / 2 + 50, y + 1, 11, def.color);
+        text(def.label, W / 2 + 72, y, 12, def.color, 'left');
     });
 
+    drawScoreboard(372);
+
     const blink = Math.sin(G.time * 5) > -0.2;
-    if (blink) text('PRESS ENTER OR TAP TO START', W / 2, 450, 18, '#ffd25a');
-    text('← → MOVE    SPACE FIRE    P PAUSE    M MUTE', W / 2, 500, 12, '#9ad');
-    text('HI-SCORE ' + String(G.hiScore).padStart(6, '0'), W / 2, 540, 14, '#fff');
+    if (blink) text('PRESS ENTER OR TAP TO START', W / 2, 522, 16, '#ffd25a');
+    text('← → MOVE   SPACE FIRE   P PAUSE   M MUTE   F FULLSCREEN', W / 2, 560, 10, '#9ad');
+}
+
+function drawNameEntry() {
+    dim(0.75);
+    text('GAME OVER', W / 2, 110, 40, COLORS.ufo);
+    text('SCORE ' + pad(G.score) + '   WAVE ' + G.wave, W / 2, 165, 16, '#fff');
+    text(G.newHiScore ? 'NEW HIGH SCORE!' : 'YOU MADE THE TOP ' + BOARD_SIZE + '!', W / 2, 200, 16, '#ffd25a');
+    text('ENTER YOUR INITIALS', W / 2, 260, 14, '#9ad');
+    const blink = Math.sin(G.time * 8) > 0;
+    G.name.forEach((ch, i) => {
+        const x = W / 2 - 60 + i * 60;
+        const active = i === G.nameIdx;
+        text(ch, x, 320, 44, active ? '#ffd25a' : '#fff');
+        ctx.fillStyle = active && blink ? '#ffd25a' : '#555';
+        ctx.fillRect(x - 22, 350, 44, 4);
+    });
+    text('TYPE LETTERS, OR ← → TO CHANGE', W / 2, 410, 11, '#9ad');
+    text('SPACE / ENTER TO CONFIRM   BACKSPACE TO GO BACK', W / 2, 432, 11, '#9ad');
 }
 
 function drawOverlay() {
@@ -717,14 +1071,28 @@ function drawOverlay() {
         text('PAUSED', W / 2, H / 2 - 10, 40, '#fff');
         text('PRESS P TO RESUME', W / 2, H / 2 + 40, 14, '#9ad');
     } else if (G.state === 'wavecleared') {
-        text('WAVE ' + G.wave + ' CLEARED', W / 2, H / 2 - 20, 32, '#3cff5a');
+        text('WAVE ' + G.wave + ' CLEARED', W / 2, H / 2 - 20, 32, COLORS.player);
+        if (isBossWave(G.wave + 1)) text('BOSS INCOMING', W / 2, H / 2 + 80, 16, COLORS.boss);
+    } else if (G.state === 'entername') {
+        drawNameEntry();
     } else if (G.state === 'gameover') {
-        dim(0.7);
-        text('GAME OVER', W / 2, H / 2 - 60, 48, '#ff3b3b');
-        text('SCORE ' + String(G.score).padStart(6, '0'), W / 2, H / 2, 20, '#fff');
-        if (G.newHiScore) text('NEW HIGH SCORE!', W / 2, H / 2 + 34, 16, '#ffd25a');
+        dim(0.75);
+        text('GAME OVER', W / 2, 90, 44, COLORS.ufo);
+        text('SCORE ' + pad(G.score) + '   WAVE ' + G.wave, W / 2, 145, 16, '#fff');
+        if (G.comboBest >= 5) text('BEST COMBO ' + G.comboBest, W / 2, 172, 12, '#9ad');
+        const mine = G.scores.find(e => e.score === G.score && G.lastEntry && e.name === G.lastEntry.join(''));
+        drawScoreboard(230, mine);
         const blink = Math.sin(G.time * 5) > -0.2;
-        if (blink) text('PRESS ENTER OR TAP TO PLAY AGAIN', W / 2, H / 2 + 90, 16, '#9ad');
+        if (blink) text('PRESS ENTER OR TAP TO PLAY AGAIN', W / 2, 420, 16, '#9ad');
+    }
+}
+
+function drawScanlines() {
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    if (G.flash > 0) {
+        ctx.fillStyle = `rgba(255,220,180,${(G.flash * 0.35).toFixed(3)})`;
+        ctx.fillRect(0, 0, W, H);
     }
 }
 
@@ -741,6 +1109,7 @@ function draw() {
         drawOverlay();
     }
     ctx.restore();
+    drawScanlines();
 }
 
 // ---------------------------------------------------------------------------
@@ -751,6 +1120,7 @@ function primaryAction() {
     if (Sound.ctx && Sound.ctx.state === 'suspended') Sound.ctx.resume();
     if (G.state === 'start' || G.state === 'gameover') startGame();
     else if (G.state === 'paused') G.state = 'playing';
+    else if (G.state === 'entername') nameAdvance();
 }
 
 function togglePause() {
@@ -758,27 +1128,52 @@ function togglePause() {
     else if (G.state === 'paused') G.state = 'playing';
 }
 
+function toggleFullscreen() {
+    const el = canvas.parentNode || canvas;
+    if (document.fullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen();
+    } else if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => {});
+    }
+}
+
+function pressLeft(down) {
+    if (down && G.state === 'entername') { nameCycle(-1); return; }
+    input.left = down;
+}
+function pressRight(down) {
+    if (down && G.state === 'entername') { nameCycle(1); return; }
+    input.right = down;
+}
+function pressFire(down) {
+    if (!down) { input.fire = false; return; }
+    Sound.init();
+    if (G.state === 'playing') { input.fire = true; input.firePressed = true; } else primaryAction();
+}
+
 document.addEventListener('keydown', e => {
     if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
+    if (G.state === 'entername') {
+        if (/^Key[A-Z]$/.test(e.code)) { nameType(e.code[3]); return; }
+        if (/^Digit[0-9]$/.test(e.code)) { nameType(e.code[5]); return; }
+        if (e.code === 'Backspace') { nameBack(); return; }
+    }
     switch (e.code) {
-        case 'ArrowLeft': case 'KeyA': input.left = true; break;
-        case 'ArrowRight': case 'KeyD': input.right = true; break;
-        case 'Space': case 'ArrowUp': case 'KeyW':
-            Sound.init();
-            if (G.state === 'playing') { input.fire = true; input.firePressed = true; }
-            else primaryAction();
-            break;
+        case 'ArrowLeft': case 'KeyA': pressLeft(true); break;
+        case 'ArrowRight': case 'KeyD': pressRight(true); break;
+        case 'Space': case 'ArrowUp': case 'KeyW': pressFire(true); break;
         case 'Enter': primaryAction(); break;
         case 'KeyP': case 'Escape': togglePause(); break;
         case 'KeyM': Sound.muted = !Sound.muted; break;
+        case 'KeyF': toggleFullscreen(); break;
     }
 });
 document.addEventListener('keyup', e => {
     switch (e.code) {
-        case 'ArrowLeft': case 'KeyA': input.left = false; break;
-        case 'ArrowRight': case 'KeyD': input.right = false; break;
-        case 'Space': case 'ArrowUp': case 'KeyW': input.fire = false; break;
+        case 'ArrowLeft': case 'KeyA': pressLeft(false); break;
+        case 'ArrowRight': case 'KeyD': pressRight(false); break;
+        case 'Space': case 'ArrowUp': case 'KeyW': pressFire(false); break;
     }
 });
 window.addEventListener('blur', () => { if (G.state === 'playing') G.state = 'paused'; });
@@ -787,6 +1182,24 @@ window.addEventListener('blur', () => { if (G.state === 'playing') G.state = 'pa
 canvas.addEventListener('pointerdown', () => {
     if (G.state !== 'playing') primaryAction();
 });
+
+// Gamepad: left stick / d-pad move, A fires, Start pauses or begins.
+const pad_ = { left: false, right: false, fire: false, start: false };
+function pollGamepad() {
+    if (!navigator.getGamepads) return;
+    const gp = Array.from(navigator.getGamepads()).find(g => g && g.connected);
+    if (!gp) return;
+    const ax = gp.axes[0] || 0;
+    const left = ax < -0.4 || (gp.buttons[14] && gp.buttons[14].pressed);
+    const right = ax > 0.4 || (gp.buttons[15] && gp.buttons[15].pressed);
+    const fireBtn = (gp.buttons[0] && gp.buttons[0].pressed) || (gp.buttons[7] && gp.buttons[7].pressed);
+    const start = gp.buttons[9] && gp.buttons[9].pressed;
+    if (left !== pad_.left) pressLeft(left);
+    if (right !== pad_.right) pressRight(right);
+    if (fireBtn !== pad_.fire) pressFire(fireBtn);
+    if (start && !pad_.start) { if (G.state === 'playing' || G.state === 'paused') togglePause(); else primaryAction(); }
+    pad_.left = left; pad_.right = right; pad_.fire = fireBtn; pad_.start = start;
+}
 
 // Touch controls (shown by CSS only on coarse pointers).
 function buildTouchControls() {
@@ -801,21 +1214,19 @@ function buildTouchControls() {
         return b;
     };
     const left = mk('◀', 'tc-left');
-    const fire = mk('FIRE', 'tc-fire');
+    const fireB = mk('FIRE', 'tc-fire');
     const right = mk('▶', 'tc-right');
-    const hold = (el, on, off) => {
-        const start = e => { e.preventDefault(); Sound.init(); on(); };
-        const end = e => { e.preventDefault(); off(); };
+    const hold = (el, fn) => {
+        const start = e => { e.preventDefault(); Sound.init(); fn(true); };
+        const end = e => { e.preventDefault(); fn(false); };
         el.addEventListener('pointerdown', start);
         el.addEventListener('pointerup', end);
         el.addEventListener('pointercancel', end);
         el.addEventListener('pointerleave', end);
     };
-    hold(left, () => { input.left = true; }, () => { input.left = false; });
-    hold(right, () => { input.right = true; }, () => { input.right = false; });
-    hold(fire, () => {
-        if (G.state === 'playing') { input.fire = true; input.firePressed = true; } else primaryAction();
-    }, () => { input.fire = false; });
+    hold(left, pressLeft);
+    hold(right, pressRight);
+    hold(fireB, pressFire);
     canvas.parentNode.appendChild(wrap);
 }
 buildTouchControls();
@@ -831,6 +1242,7 @@ function frame(now) {
     last = now;
     if (dt > 0.1) dt = 0.1;
     acc += dt;
+    pollGamepad();
     while (acc >= STEP) {
         update(STEP);
         acc -= STEP;
@@ -840,5 +1252,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss };
 })();
