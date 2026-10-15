@@ -75,6 +75,25 @@
             #touchControls { display: grid; }
             #gameWrap { width: min(100%, 800px, calc((100dvh - 120px) * 4 / 3)); }
         }
+        /* Landscape phones: float the buttons over the bottom corners so the
+           canvas can use the full height. Drag-to-move works on the canvas too. */
+        @media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+            body { padding: 0; }
+            #gameWrap { position: relative; width: min(100%, calc(100dvh * 4 / 3)); gap: 0; }
+            canvas { border-radius: 0; border: 0; }
+            #touchControls {
+                position: absolute;
+                left: 0; right: 0; bottom: 0;
+                grid-template-columns: 1fr 1fr 1fr;
+                padding: 0 8px 8px;
+                pointer-events: none;
+            }
+            #touchControls button { pointer-events: auto; opacity: 0.55; padding: 14px 0; }
+            #touchControls .tc-fire { justify-self: center; width: 40%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            canvas { box-shadow: none; }
+        }
     </style>
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-34RWEG01MV"></script>

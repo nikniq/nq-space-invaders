@@ -17,13 +17,16 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - Keyboard, gamepad and on-screen touch controls; scales to any screen; fullscreen toggle
 
 ## How to Play
+- Pick **Easy / Normal / Hard** on the title screen with ← → (Easy gives four lives, slower and sparser enemy fire). Your choice and the mute setting are remembered.
 - **Left/Right** arrows (or **A/D**) move, **Space** fires (hold for autofire with Rapid)
-- **Enter** starts or restarts, **P** or **Esc** pauses, **M** mutes, **F** toggles fullscreen
-- Gamepad: left stick or d-pad moves, A fires, Start pauses
-- On touch devices use the on-screen buttons; tap the game to start
+- **Enter** starts or restarts, **P** or **Esc** opens the pause menu (Resume / Restart / Sound / Quit), **M** mutes, **F** toggles fullscreen
+- Gamepad: left stick or d-pad moves, A fires, Start pauses, d-pad navigates menus
+- Touch: **drag anywhere on the game to move** and tap to fire, or use the on-screen buttons; tap to start
+- Every wave and respawn starts with a short **Get Ready** countdown so you are never shot before you can react
 - Clear the fleet to advance; lose a life when hit, and the game ends if the invaders reach you
 - Catch falling capsules for power-ups; shoot the saucer for mystery points
 - Make the top five and you will be asked for your initials
+- The game pauses itself when the tab is hidden or loses focus, and honours the system reduced-motion setting (no screen shake)
 
 ## Project Layout
 This is a standard Laravel project with one difference: the web root is `public_html` instead of `public`

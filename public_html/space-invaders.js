@@ -165,6 +165,15 @@ const POWERUPS = {
 };
 const POWERUP_DROP_CHANCE = 0.09;
 
+// Difficulty presets, chosen on the title screen and remembered.
+const DIFFS = {
+    easy:   { label: 'EASY',   lives: 4, bulletSpeed: 0.75, fireRate: 1.6, fleet: 1.3, drop: 1.6, extraBullets: -1 },
+    normal: { label: 'NORMAL', lives: 3, bulletSpeed: 1,    fireRate: 1,   fleet: 1,   drop: 1,   extraBullets: 0 },
+    hard:   { label: 'HARD',   lives: 3, bulletSpeed: 1.3,  fireRate: 0.7, fleet: 0.8, drop: 0.7, extraBullets: 1 },
+};
+const DIFF_ORDER = ['easy', 'normal', 'hard'];
+function diff() { return DIFFS[G.difficulty] || DIFFS.normal; }
+
 // ---------------------------------------------------------------------------
 // Sound — tiny WebAudio synth, created on first user gesture.
 // ---------------------------------------------------------------------------
@@ -321,6 +330,14 @@ function qualifies(score) {
     return score > 0 && (G.scores.length < BOARD_SIZE || score > G.scores[G.scores.length - 1].score);
 }
 
+const SETTINGS_KEY = 'nq-space-invaders-settings';
+function loadSettings() {
+    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveSettings() {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ difficulty: G.difficulty, muted: Sound.muted })); } catch (e) { /* ignore */ }
+}
+
 // ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
@@ -362,8 +379,21 @@ const G = {
     name: ['A', 'A', 'A'],
     nameIdx: 0,
     lastEntry: null,
+    difficulty: 'normal',
+    inputMode: 'keys', // keys | touch | pad — picks the wording of on-screen hints
+    targetX: null,     // touch drag target for the ship
+    menuIdx: 0,
+    reduceMotion: false,
 };
 G.hiScore = G.scores.length ? G.scores[0].score : 0;
+{
+    const st = loadSettings();
+    if (DIFFS[st.difficulty]) G.difficulty = st.difficulty;
+    Sound.muted = !!st.muted;
+    const mm = q => !!(window.matchMedia && window.matchMedia(q).matches);
+    if (mm('(pointer: coarse)')) G.inputMode = 'touch';
+    G.reduceMotion = mm('(prefers-reduced-motion: reduce)');
+}
 
 const input = { left: false, right: false, fire: false, firePressed: false };
 
@@ -421,7 +451,7 @@ function makeBunkers() {
 function startGame() {
     G.score = 0;
     G.newHiScore = false;
-    G.lives = 3;
+    G.lives = diff().lives;
     G.nextLifeAt = EXTRA_LIFE_EVERY;
     G.wave = 1;
     G.combo = 0;
@@ -436,7 +466,7 @@ function startGame() {
     G.shield = 0;
     G.lastEntry = null;
     startWave();
-    G.state = 'playing';
+    getReady(2.2);
 }
 
 function startWave() {
@@ -452,7 +482,6 @@ function startWave() {
     G.ufo = null;
     G.ufoTimer = rand(12, 20);
     if (G.wave > 1) G.bunkers = makeBunkers();
-    if (G.boss) popup(W / 2, H / 2 - 40, 'BOSS WAVE', COLORS.boss, 2.5);
 }
 
 function addScore(n) {
@@ -484,7 +513,7 @@ function popup(x, y, text, color = '#fff', life = 1.0) {
 }
 
 function dropPowerup(x, y) {
-    if (Math.random() > POWERUP_DROP_CHANCE) return;
+    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop) return;
     const total = Object.values(POWERUPS).reduce((s, p) => s + p.weight, 0);
     let r = Math.random() * total;
     let type = 'rapid';
@@ -540,6 +569,79 @@ function missShot() {
 }
 
 // ---------------------------------------------------------------------------
+// Flow helpers: ready countdown, movement, settings, pause menu
+// ---------------------------------------------------------------------------
+function getReady(secs) {
+    G.state = 'ready';
+    G.stateTimer = secs;
+    G.targetX = null;
+}
+
+function shakeScreen(n) { if (!G.reduceMotion) G.shake = n; }
+
+function movePlayer(dt) {
+    const p = G.player;
+    if (G.targetX !== null) {
+        const want = clamp(G.targetX - p.w / 2, 8, W - p.w - 8);
+        const d = want - p.x;
+        const step = p.speed * 1.7 * dt;
+        p.x += Math.abs(d) <= step ? d : Math.sign(d) * step;
+    } else {
+        if (input.left) p.x -= p.speed * dt;
+        if (input.right) p.x += p.speed * dt;
+    }
+    p.x = clamp(p.x, 8, W - p.w - 8);
+}
+
+function cycleDifficulty(dir) {
+    const i = DIFF_ORDER.indexOf(G.difficulty);
+    G.difficulty = DIFF_ORDER[(i + dir + DIFF_ORDER.length) % DIFF_ORDER.length];
+    saveSettings();
+    Sound.blip();
+}
+
+function toggleMute() {
+    Sound.muted = !Sound.muted;
+    saveSettings();
+}
+
+const PAUSE_MENU = ['RESUME', 'RESTART', 'SOUND', 'QUIT TO TITLE'];
+const MENU_Y0 = H / 2 - 20;
+const MENU_DY = 34;
+function menuMove(dir) {
+    G.menuIdx = (G.menuIdx + dir + PAUSE_MENU.length) % PAUSE_MENU.length;
+    Sound.blip();
+}
+function menuSelect() {
+    switch (G.menuIdx) {
+        case 0: G.state = 'playing'; break;
+        case 1: startGame(); break;
+        case 2: toggleMute(); break;
+        case 3: quitToTitle(); break;
+    }
+}
+function quitToTitle() {
+    if (qualifies(G.score)) { endGame(); return; }
+    G.state = 'start';
+    G.invaders = []; G.boss = null; G.ufo = null;
+    G.enemyBullets = []; G.playerBullets = []; G.powerups = [];
+    G.particles = []; G.popups = []; G.corpses = [];
+    G.shield = 0; G.power = { type: null, timer: 0 };
+}
+
+function hintText(kind) {
+    const m = G.inputMode;
+    switch (kind) {
+        case 'start': return m === 'touch' ? 'TAP TO START' : m === 'pad' ? 'PRESS START OR A TO BEGIN' : 'PRESS ENTER OR SPACE TO START';
+        case 'again': return m === 'touch' ? 'TAP TO PLAY AGAIN' : m === 'pad' ? 'PRESS START TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN';
+        case 'controls': return m === 'touch' ? 'DRAG TO MOVE · TAP TO FIRE' : m === 'pad' ? 'STICK OR D-PAD MOVE · A FIRE · START PAUSE' : '← → MOVE · SPACE FIRE · P PAUSE · M MUTE · F FULLSCREEN';
+        case 'difficulty': return m === 'touch' ? 'USE ◀ ▶ BELOW TO CHANGE DIFFICULTY' : m === 'pad' ? 'STICK LEFT / RIGHT TO CHANGE DIFFICULTY' : '← → TO CHANGE DIFFICULTY';
+        case 'menu': return m === 'touch' ? 'TAP AN OPTION' : m === 'pad' ? 'D-PAD SELECT · A CONFIRM · START RESUME' : '↑ ↓ SELECT · ENTER CONFIRM · P RESUME';
+    }
+    return '';
+}
+
+// ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
 function aliveInvaders() { return G.invaders.filter(i => i.alive); }
@@ -547,7 +649,7 @@ function aliveInvaders() { return G.invaders.filter(i => i.alive); }
 function fleetInterval(aliveCount) {
     const total = G.invaders.length;
     const base = Math.max(0.14, 0.55 - (G.wave - 1) * 0.04);
-    return Math.max(0.035, base * Math.pow(aliveCount / total, 0.8) + 0.03);
+    return Math.max(0.035, base * Math.pow(aliveCount / total, 0.8) + 0.03) * diff().fleet;
 }
 
 function spawnEnemyBullet(x, y, vx, vy) {
@@ -580,7 +682,7 @@ function update(dt) {
             } else {
                 G.player = makePlayer();
                 G.enemyBullets = [];
-                G.state = 'playing';
+                getReady(1.2);
             }
         }
         return;
@@ -590,10 +692,17 @@ function update(dt) {
         if (G.stateTimer <= 0) {
             G.wave += 1;
             startWave();
-            G.state = 'playing';
+            getReady(1.8);
         }
         return;
     }
+    if (G.state === 'ready') {
+        G.stateTimer -= dt;
+        movePlayer(dt);
+        if (G.stateTimer <= 0) G.state = 'playing';
+        return;
+    }
+    if (G.state === 'gameover') { G.stateTimer -= dt; return; }
     if (G.state !== 'playing') return;
 
     const player = G.player;
@@ -606,10 +715,7 @@ function update(dt) {
     }
     if (G.shield > 0) G.shield = Math.max(0, G.shield - dt);
 
-    // Player movement
-    if (input.left) player.x -= player.speed * dt;
-    if (input.right) player.x += player.speed * dt;
-    player.x = clamp(player.x, 8, W - player.w - 8);
+    movePlayer(dt);
 
     // Player fire — edge-triggered; rapid fire also autofires while held.
     if (input.firePressed || (G.power.type === 'rapid' && input.fire)) fire();
@@ -691,7 +797,7 @@ function update(dt) {
 
         // Enemy fire — bottom-most invader of a random column.
         G.enemyFireTimer -= dt;
-        const maxEnemyBullets = Math.min(3 + Math.floor(G.wave / 2), 6);
+        const maxEnemyBullets = clamp(3 + Math.floor(G.wave / 2) + diff().extraBullets, 1, 7);
         if (G.enemyFireTimer <= 0 && G.enemyBullets.length < maxEnemyBullets) {
             const cols = {};
             for (const inv of alive) {
@@ -706,8 +812,8 @@ function update(dt) {
             } else {
                 shooter = shooters[Math.floor(Math.random() * shooters.length)];
             }
-            spawnEnemyBullet(shooter.x + shooter.w / 2, shooter.y + shooter.h, 0, 170 + G.wave * 15);
-            G.enemyFireTimer = Math.max(0.35, rand(0.9, 1.5) - G.wave * 0.07);
+            spawnEnemyBullet(shooter.x + shooter.w / 2, shooter.y + shooter.h, 0, (170 + G.wave * 15) * diff().bulletSpeed);
+            G.enemyFireTimer = Math.max(0.35, rand(0.9, 1.5) - G.wave * 0.07) * diff().fireRate;
         }
     }
 
@@ -722,9 +828,10 @@ function update(dt) {
         if (bs.fireTimer <= 0) {
             const cx = bs.x + bs.w / 2, cy = bs.y + bs.h;
             const toPlayer = clamp((player.x + player.w / 2 - cx) * 0.7, -220, 220);
-            spawnEnemyBullet(cx, cy, toPlayer, 200);
-            spawnEnemyBullet(cx - 20, cy, toPlayer - 110, 190);
-            spawnEnemyBullet(cx + 20, cy, toPlayer + 110, 190);
+            const sp = diff().bulletSpeed;
+            spawnEnemyBullet(cx, cy, toPlayer * sp, 200 * sp);
+            spawnEnemyBullet(cx - 20, cy, (toPlayer - 110) * sp, 190 * sp);
+            spawnEnemyBullet(cx + 20, cy, (toPlayer + 110) * sp, 190 * sp);
             bs.fireTimer = Math.max(0.9, 2.2 - G.wave * 0.05) * (bs.hp < bs.maxHp / 3 ? 0.6 : 1);
         }
     }
@@ -808,8 +915,8 @@ function killBoss() {
     burst(bs.x + bs.w / 2, bs.y + bs.h / 2, '#fff', 30, 200);
     G.corpses.push({ x: bs.x + bs.w / 2 - SPR.burst.boss.width / 2, y: bs.y + bs.h / 2 - SPR.burst.boss.height / 2, spr: SPR.burst.boss, life: 0.5 });
     popup(bs.x + bs.w / 2, bs.y, String(pts), COLORS.boss, 2);
-    G.shake = 14;
-    G.flash = 1;
+    shakeScreen(14);
+    G.flash = G.reduceMotion ? 0.3 : 1;
     G.boss = null;
     Sound.bossDie();
 }
@@ -818,7 +925,7 @@ function killPlayer(invaded) {
     const p = G.player;
     burst(p.x + p.w / 2, p.y + p.h / 2, COLORS.player, 40, 260);
     Sound.playerHit();
-    G.shake = 8;
+    shakeScreen(8);
     G.lives -= invaded ? G.lives : 1;
     G.playerBullets = [];
     G.combo = 0;
@@ -835,6 +942,7 @@ function endGame() {
         G.state = 'entername';
     } else {
         G.state = 'gameover';
+        G.stateTimer = 1.0;
     }
 }
 
@@ -847,6 +955,7 @@ function commitName() {
     saveScores(G.scores);
     G.hiScore = G.scores[0].score;
     G.state = 'gameover';
+    G.stateTimer = 0.6;
     Sound.wave();
 }
 
@@ -929,7 +1038,9 @@ function drawHud() {
     // Lives + ground line
     ctx.fillStyle = COLORS.player;
     ctx.fillRect(0, H - 28, W, 2);
-    text(String(G.lives), 24, H - 14, 14, COLORS.player, 'left');
+    const lowLife = G.lives === 1 && (G.state === 'playing' || G.state === 'ready') && Math.sin(G.time * 6) > 0;
+    text(String(G.lives), 24, H - 14, 14, lowLife ? COLORS.ufo : COLORS.player, 'left');
+    if (G.lives === 1 && G.state === 'playing') text('LAST LIFE', 24 + 40, H - 14, 10, lowLife ? COLORS.ufo : '#888', 'left');
     for (let i = 0; i < Math.max(0, G.lives - 1); i++) {
         ctx.drawImage(SPR.player, 48 + i * 34, H - 24, SPR.player.width * 0.6, SPR.player.height * 0.6);
     }
@@ -1040,11 +1151,22 @@ function drawStartScreen() {
         text(def.label, W / 2 + 72, y, 12, def.color, 'left');
     });
 
-    drawScoreboard(372);
+    drawScoreboard(348);
+
+    // Difficulty selector
+    const dy = 506;
+    text('DIFFICULTY', W / 2 - 150, dy, 12, '#9ad', 'right');
+    DIFF_ORDER.forEach((k, i) => {
+        const x = W / 2 - 80 + i * 110;
+        const sel = k === G.difficulty;
+        text(DIFFS[k].label, x, dy, 14, sel ? '#ffd25a' : '#666');
+        if (sel) { ctx.fillStyle = '#ffd25a'; ctx.fillRect(x - 36, dy + 12, 72, 2); }
+    });
+    text(hintText('difficulty'), W / 2, 530, 9, '#567');
 
     const blink = Math.sin(G.time * 5) > -0.2;
-    if (blink) text('PRESS ENTER OR TAP TO START', W / 2, 522, 16, '#ffd25a');
-    text('← → MOVE   SPACE FIRE   P PAUSE   M MUTE   F FULLSCREEN', W / 2, 560, 10, '#9ad');
+    if (blink) text(hintText('start'), W / 2, 556, 16, '#ffd25a');
+    text(hintText('controls'), W / 2, 580, 9, '#9ad');
 }
 
 function drawNameEntry() {
@@ -1067,9 +1189,19 @@ function drawNameEntry() {
 
 function drawOverlay() {
     if (G.state === 'paused') {
-        dim(0.6);
-        text('PAUSED', W / 2, H / 2 - 10, 40, '#fff');
-        text('PRESS P TO RESUME', W / 2, H / 2 + 40, 14, '#9ad');
+        dim(0.7);
+        text('PAUSED', W / 2, H / 2 - 90, 40, '#fff');
+        PAUSE_MENU.forEach((item, i) => {
+            const label = item === 'SOUND' ? 'SOUND: ' + (Sound.muted ? 'OFF' : 'ON') : item;
+            const sel = i === G.menuIdx;
+            text((sel ? '▶ ' : '') + label, W / 2, MENU_Y0 + i * MENU_DY, 16, sel ? '#ffd25a' : '#fff');
+        });
+        text(hintText('menu'), W / 2, H / 2 + 130, 10, '#9ad');
+    } else if (G.state === 'ready') {
+        const title = G.boss ? 'BOSS WAVE ' + G.wave : 'WAVE ' + G.wave;
+        text(title, W / 2, H / 2 - 40, 32, G.boss ? COLORS.boss : COLORS.player);
+        text('GET READY', W / 2, H / 2 + 6, 18, '#ffd25a');
+        if (G.wave === 1 || G.inputMode === 'touch') text(hintText('controls'), W / 2, H / 2 + 46, 10, '#9ad');
     } else if (G.state === 'wavecleared') {
         text('WAVE ' + G.wave + ' CLEARED', W / 2, H / 2 - 20, 32, COLORS.player);
         if (isBossWave(G.wave + 1)) text('BOSS INCOMING', W / 2, H / 2 + 80, 16, COLORS.boss);
@@ -1083,7 +1215,7 @@ function drawOverlay() {
         const mine = G.scores.find(e => e.score === G.score && G.lastEntry && e.name === G.lastEntry.join(''));
         drawScoreboard(230, mine);
         const blink = Math.sin(G.time * 5) > -0.2;
-        if (blink) text('PRESS ENTER OR TAP TO PLAY AGAIN', W / 2, 420, 16, '#9ad');
+        if (G.stateTimer <= 0 && blink) text(hintText('again'), W / 2, 420, 16, '#9ad');
     }
 }
 
@@ -1118,13 +1250,14 @@ function draw() {
 function primaryAction() {
     Sound.init();
     if (Sound.ctx && Sound.ctx.state === 'suspended') Sound.ctx.resume();
-    if (G.state === 'start' || G.state === 'gameover') startGame();
-    else if (G.state === 'paused') G.state = 'playing';
+    if (G.state === 'start') startGame();
+    else if (G.state === 'gameover') { if (G.stateTimer <= 0) startGame(); }
+    else if (G.state === 'paused') menuSelect();
     else if (G.state === 'entername') nameAdvance();
 }
 
 function togglePause() {
-    if (G.state === 'playing') G.state = 'paused';
+    if (G.state === 'playing' || G.state === 'ready') { G.pausedFrom = G.state; G.state = 'paused'; G.menuIdx = 0; }
     else if (G.state === 'paused') G.state = 'playing';
 }
 
@@ -1138,26 +1271,42 @@ function toggleFullscreen() {
 }
 
 function pressLeft(down) {
+    if (down && G.state === 'start') { cycleDifficulty(-1); return; }
     if (down && G.state === 'entername') { nameCycle(-1); return; }
     input.left = down;
 }
 function pressRight(down) {
+    if (down && G.state === 'start') { cycleDifficulty(1); return; }
     if (down && G.state === 'entername') { nameCycle(1); return; }
     input.right = down;
 }
 function pressFire(down) {
     if (!down) { input.fire = false; return; }
     Sound.init();
-    if (G.state === 'playing') { input.fire = true; input.firePressed = true; } else primaryAction();
+    if (G.state === 'playing') { input.fire = true; input.firePressed = true; }
+    else if (G.state === 'ready') { input.fire = true; }
+    else primaryAction();
 }
 
 document.addEventListener('keydown', e => {
     if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
+    G.inputMode = 'keys';
     if (G.state === 'entername') {
         if (/^Key[A-Z]$/.test(e.code)) { nameType(e.code[3]); return; }
         if (/^Digit[0-9]$/.test(e.code)) { nameType(e.code[5]); return; }
         if (e.code === 'Backspace') { nameBack(); return; }
+    }
+    if (G.state === 'paused') {
+        switch (e.code) {
+            case 'ArrowUp': case 'KeyW': menuMove(-1); break;
+            case 'ArrowDown': case 'KeyS': menuMove(1); break;
+            case 'Enter': case 'Space': menuSelect(); break;
+            case 'KeyP': case 'Escape': G.state = 'playing'; break;
+            case 'KeyM': toggleMute(); break;
+            case 'KeyF': toggleFullscreen(); break;
+        }
+        return;
     }
     switch (e.code) {
         case 'ArrowLeft': case 'KeyA': pressLeft(true); break;
@@ -1165,7 +1314,7 @@ document.addEventListener('keydown', e => {
         case 'Space': case 'ArrowUp': case 'KeyW': pressFire(true); break;
         case 'Enter': primaryAction(); break;
         case 'KeyP': case 'Escape': togglePause(); break;
-        case 'KeyM': Sound.muted = !Sound.muted; break;
+        case 'KeyM': toggleMute(); break;
         case 'KeyF': toggleFullscreen(); break;
     }
 });
@@ -1176,15 +1325,44 @@ document.addEventListener('keyup', e => {
         case 'Space': case 'ArrowUp': case 'KeyW': pressFire(false); break;
     }
 });
-window.addEventListener('blur', () => { if (G.state === 'playing') G.state = 'paused'; });
+// Pause whenever the player can't see the game.
+window.addEventListener('blur', () => { if (G.state === 'playing') togglePause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && G.state === 'playing') togglePause(); });
 
-// Tap/click on the canvas starts or resumes.
-canvas.addEventListener('pointerdown', () => {
-    if (G.state !== 'playing') primaryAction();
+// Pointer on the canvas: touch/pen drag moves the ship and taps fire; any
+// pointer starts, restarts, confirms or picks a pause-menu item.
+function canvasPoint(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+}
+let canvasPointer = null;
+canvas.addEventListener('pointerdown', e => {
+    const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
+    if (touchLike) G.inputMode = 'touch';
+    Sound.init();
+    if (G.state === 'playing' || G.state === 'ready') {
+        if (touchLike) {
+            canvasPointer = e.pointerId;
+            G.targetX = canvasPoint(e).x;
+            if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
+        }
+        if (G.state === 'playing') input.firePressed = true;
+    } else if (G.state === 'paused') {
+        const idx = Math.round((canvasPoint(e).y - MENU_Y0) / MENU_DY);
+        if (idx >= 0 && idx < PAUSE_MENU.length) { G.menuIdx = idx; menuSelect(); }
+    } else {
+        primaryAction();
+    }
 });
+canvas.addEventListener('pointermove', e => {
+    if (canvasPointer === e.pointerId && G.targetX !== null) G.targetX = canvasPoint(e).x;
+});
+const releaseCanvas = e => { if (canvasPointer === e.pointerId) { canvasPointer = null; G.targetX = null; } };
+canvas.addEventListener('pointerup', releaseCanvas);
+canvas.addEventListener('pointercancel', releaseCanvas);
 
 // Gamepad: left stick / d-pad move, A fires, Start pauses or begins.
-const pad_ = { left: false, right: false, fire: false, start: false };
+const pad_ = { left: false, right: false, fire: false, start: false, up: false, down: false };
 function pollGamepad() {
     if (!navigator.getGamepads) return;
     const gp = Array.from(navigator.getGamepads()).find(g => g && g.connected);
@@ -1194,6 +1372,14 @@ function pollGamepad() {
     const right = ax > 0.4 || (gp.buttons[15] && gp.buttons[15].pressed);
     const fireBtn = (gp.buttons[0] && gp.buttons[0].pressed) || (gp.buttons[7] && gp.buttons[7].pressed);
     const start = gp.buttons[9] && gp.buttons[9].pressed;
+    const up = (gp.buttons[12] && gp.buttons[12].pressed) || (gp.axes[1] || 0) < -0.5;
+    const down = (gp.buttons[13] && gp.buttons[13].pressed) || (gp.axes[1] || 0) > 0.5;
+    if (left || right || fireBtn || start || up || down) G.inputMode = 'pad';
+    if (G.state === 'paused') {
+        if (up && !pad_.up) menuMove(-1);
+        if (down && !pad_.down) menuMove(1);
+    }
+    pad_.up = up; pad_.down = down;
     if (left !== pad_.left) pressLeft(left);
     if (right !== pad_.right) pressRight(right);
     if (fireBtn !== pad_.fire) pressFire(fireBtn);
@@ -1217,7 +1403,7 @@ function buildTouchControls() {
     const fireB = mk('FIRE', 'tc-fire');
     const right = mk('▶', 'tc-right');
     const hold = (el, fn) => {
-        const start = e => { e.preventDefault(); Sound.init(); fn(true); };
+        const start = e => { e.preventDefault(); Sound.init(); G.inputMode = 'touch'; fn(true); };
         const end = e => { e.preventDefault(); fn(false); };
         el.addEventListener('pointerdown', start);
         el.addEventListener('pointerup', end);
@@ -1252,5 +1438,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS };
 })();
