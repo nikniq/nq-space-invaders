@@ -7,6 +7,10 @@
     <meta name="description" content="Classic Space Invaders in your browser. Arrow keys to move, space to fire.">
     <meta name="theme-color" content="#111111">
     <link rel="icon" href="{{ asset('icon.svg') }}" type="image/svg+xml">
+    <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Invaders">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -111,5 +115,10 @@
         <canvas id="gameCanvas" width="800" height="600" aria-label="Space Invaders game"></canvas>
     </div>
     <script src="{{ asset('space-invaders.js') }}?v={{ filemtime(public_path('space-invaders.js')) }}"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('{{ asset('sw.js') }}').catch(() => {}));
+        }
+    </script>
 </body>
 </html>

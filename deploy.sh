@@ -44,7 +44,7 @@ php artisan optimize
 
 echo "→ verify"
 php artisan route:list --path=/ --columns=method,uri,name
-for f in index.php space-invaders.js icon.svg ads.txt; do
+for f in index.php space-invaders.js icon.svg ads.txt manifest.webmanifest sw.js; do
     [ -f "public_html/$f" ] && echo "  ✓ public_html/$f" || { echo "  ✗ public_html/$f missing"; exit 1; }
 done
 
