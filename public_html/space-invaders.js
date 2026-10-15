@@ -21,20 +21,22 @@ ctx.imageSmoothingEnabled = false;
 // ---------------------------------------------------------------------------
 const PIX = {
     player: [
-        '......#......',
-        '.....###.....',
-        '.....###.....',
-        '.###########.',
-        '#############',
-        '#############',
-        '#############',
-        '#############',
+        '.......#.......',
+        '......###......',
+        '......#o#......',
+        '.....##o##.....',
+        '..#..#####..#..',
+        '..#.#######.#..',
+        '.#############.',
+        '###-#######-###',
+        '###--#####--###',
+        '##....###....##',
     ],
     squid: [[
         '...##...',
         '..####..',
         '.######.',
-        '##.##.##',
+        '##o##o##',
         '########',
         '..#..#..',
         '.#.##.#.',
@@ -43,7 +45,7 @@ const PIX = {
         '...##...',
         '..####..',
         '.######.',
-        '##.##.##',
+        '##o##o##',
         '########',
         '.#.##.#.',
         '#......#',
@@ -53,7 +55,7 @@ const PIX = {
         '..#.....#..',
         '...#...#...',
         '..#######..',
-        '.##.###.##.',
+        '.##o###o##.',
         '###########',
         '#.#######.#',
         '#.#.....#.#',
@@ -62,7 +64,7 @@ const PIX = {
         '..#.....#..',
         '#..#...#..#',
         '#.#######.#',
-        '###.###.###',
+        '###o###o###',
         '###########',
         '.#########.',
         '..#.....#..',
@@ -72,7 +74,7 @@ const PIX = {
         '....####....',
         '.##########.',
         '############',
-        '###..##..###',
+        '###oo##oo###',
         '############',
         '...##..##...',
         '..##.##.##..',
@@ -81,7 +83,7 @@ const PIX = {
         '....####....',
         '.##########.',
         '############',
-        '###..##..###',
+        '###oo##oo###',
         '############',
         '..###..###..',
         '.##..##..##.',
@@ -101,7 +103,7 @@ const PIX = {
         '.....##############.....',
         '...##################...',
         '..####################..',
-        '.###..####....####..###.',
+        '.###oo####oooo####oo###.',
         '########################',
         '########################',
         '..##.####..##..####.##..',
@@ -147,18 +149,22 @@ function makeCanvas(w, h) {
 // vertical sheen, and a pre-blurred glow copy so the frame loop never pays
 // for shadowBlur.
 const GLOW_PAD = 12;
-function renderSprite(rows, color, scale, glow = true) {
+// `pal` is a colour string or a map from pixel character to colour, e.g.
+// { '#': body, 'o': eyes, '-': panel }. '#' is the main colour and the glow.
+function renderSprite(rows, pal, scale, glow = true) {
+    if (typeof pal === 'string') pal = { '#': pal };
+    const color = pal['#'];
     const c = makeCanvas(rows[0].length * scale, rows.length * scale);
     const g = c.getContext('2d');
-    const hi = shade(color, 0.6), lo = shade(color, -0.4);
-    const on = (x, y) => y >= 0 && y < rows.length && rows[y][x] === '#';
+    const on = (x, y) => y >= 0 && y < rows.length && !!pal[rows[y][x]];
     rows.forEach((row, y) => {
         for (let x = 0; x < row.length; x++) {
-            if (row[x] !== '#') continue;
-            g.fillStyle = color;
+            const col = pal[row[x]];
+            if (!col) continue;
+            g.fillStyle = col;
             g.fillRect(x * scale, y * scale, scale, scale);
-            if (!on(x, y - 1)) { g.fillStyle = hi; g.fillRect(x * scale, y * scale, scale, 1); }
-            if (!on(x, y + 1)) { g.fillStyle = lo; g.fillRect(x * scale, y * scale + scale - 1, scale, 1); }
+            if (!on(x, y - 1)) { g.fillStyle = shade(col, 0.6); g.fillRect(x * scale, y * scale, scale, 1); }
+            if (!on(x, y + 1)) { g.fillStyle = shade(col, -0.4); g.fillRect(x * scale, y * scale + scale - 1, scale, 1); }
         }
     });
     g.globalCompositeOperation = 'source-atop';
@@ -183,7 +189,7 @@ function makeGlow(src, color, blur = 10) {
 }
 function drawSprite(spr, x, y, glowAlpha = 0.55) {
     x = Math.round(x); y = Math.round(y);
-    if (spr.glow && glowAlpha > 0) {
+    if (spr.glow && glowAlpha > 0 && G.fx !== 'low') {
         const a0 = ctx.globalAlpha;
         ctx.globalAlpha = a0 * glowAlpha;
         ctx.imageSmoothingEnabled = true;
@@ -219,14 +225,21 @@ function drawLight(x, y, size, color, alpha = 1) {
 
 const SCALE = 3;
 const COLORS = { squid: '#ffffff', crab: '#5ad7ff', octopus: '#ff6ad5', ufo: '#ff3b3b', player: '#3cff5a', boss: '#ff8c3b' };
+const PAL = {
+    player: { '#': COLORS.player, 'o': '#7affff', '-': '#1c8a33' },
+    squid: { '#': COLORS.squid, 'o': '#ff4060' },
+    crab: { '#': COLORS.crab, 'o': '#ffe04a' },
+    octopus: { '#': COLORS.octopus, 'o': '#7affff' },
+    boss: { '#': COLORS.boss, 'o': '#ffe08a' },
+};
 const SPR = {
-    player: renderSprite(PIX.player, COLORS.player, SCALE),
-    squid: PIX.squid.map(f => renderSprite(f, COLORS.squid, SCALE)),
-    crab: PIX.crab.map(f => renderSprite(f, COLORS.crab, SCALE)),
-    octopus: PIX.octopus.map(f => renderSprite(f, COLORS.octopus, SCALE)),
+    player: renderSprite(PIX.player, PAL.player, SCALE),
+    squid: PIX.squid.map(f => renderSprite(f, PAL.squid, SCALE)),
+    crab: PIX.crab.map(f => renderSprite(f, PAL.crab, SCALE)),
+    octopus: PIX.octopus.map(f => renderSprite(f, PAL.octopus, SCALE)),
     ufo: renderSprite(PIX.ufo, COLORS.ufo, SCALE),
-    boss: renderSprite(PIX.boss, COLORS.boss, SCALE + 1),
-    bossFlash: renderSprite(PIX.boss, '#ffffff', SCALE + 1),
+    boss: renderSprite(PIX.boss, PAL.boss, SCALE + 1),
+    bossFlash: renderSprite(PIX.boss, { '#': '#ffffff', 'o': '#ffffff' }, SCALE + 1),
     burst: {},
 };
 for (const k of ['squid', 'crab', 'octopus', 'ufo', 'boss']) SPR.burst[k] = renderSprite(PIX.burst, COLORS[k], SCALE);
@@ -304,6 +317,30 @@ const CRT = (() => {
     g.fillRect(0, 0, W * DPR, H * DPR);
     return c;
 })();
+
+// Bloom: the frame is shrunk twice, squared (multiply with itself) so only
+// bright pixels survive, then added back blurred by bilinear upscaling.
+const BLOOM_A = makeCanvas(W / 2, H / 2);
+const BLOOM_B = makeCanvas(W / 4, H / 4);
+const BLOOM_C = makeCanvas(W / 8, H / 8);
+const bloomA = BLOOM_A.getContext('2d');
+const bloomB = BLOOM_B.getContext('2d');
+const bloomC = BLOOM_C.getContext('2d');
+
+function vignette(color) {
+    const c = makeCanvas(W, H);
+    const g = c.getContext('2d');
+    const v = g.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
+    v.addColorStop(0, rgba(color, 0));
+    v.addColorStop(1, rgba(color, 0.65));
+    g.fillStyle = v;
+    g.fillRect(0, 0, W, H);
+    return c;
+}
+const HURT = { red: vignette('#ff2030'), green: vignette('#3cff9a') };
+
+const TITLE = makeCanvas(W * DPR, 160 * DPR);
+const titleCtx = TITLE.getContext('2d');
 
 // Bolt trails, pre-rendered as vertical fades.
 function trailSprite(color, len) {
@@ -511,6 +548,7 @@ class Bunker {
             }
         }
         this.dirty = true;
+        burst(this.x + hitX * CELL + CELL / 2, this.y + hitY * CELL + CELL / 2, '#2fd94e', 5, 90);
         return true;
     }
     // Invaders simply carve away whatever they overlap.
@@ -584,7 +622,7 @@ function loadSettings() {
     try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch (e) { return {}; }
 }
 function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ difficulty: G.difficulty, muted: Sound.muted, music: Music.enabled })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ difficulty: G.difficulty, muted: Sound.muted, music: Music.enabled, fx: G.fxLocked ? G.fx : undefined })); } catch (e) { /* ignore */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +682,12 @@ const G = {
     bgScroll: 0,
     readyTotal: 1,
     waveIntro: false,
+    hurt: 0,
+    hurtTex: null,
+    meteors: [],
+    meteorTimer: 5,
+    fx: 'high',      // high | low; low drops bloom and sprite glow
+    fxLocked: false, // true once the player picks a level by hand
 };
 G.hiScore = G.scores.length ? G.scores[0].score : 0;
 {
@@ -651,6 +695,7 @@ G.hiScore = G.scores.length ? G.scores[0].score : 0;
     if (DIFFS[st.difficulty]) G.difficulty = st.difficulty;
     Sound.muted = !!st.muted;
     if (st.music === false) Music.enabled = false;
+    if (st.fx === 'high' || st.fx === 'low') { G.fx = st.fx; G.fxLocked = true; }
     const mm = q => !!(window.matchMedia && window.matchMedia(q).matches);
     if (mm('(pointer: coarse)')) G.inputMode = 'touch';
     G.reduceMotion = mm('(prefers-reduced-motion: reduce)');
@@ -770,6 +815,7 @@ function addScore(n) {
 }
 
 function burst(x, y, color, n = 14, speed = 160) {
+    if (G.particles.length > 900) n = Math.min(n, 4);
     for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
         const s = rand(speed * 0.3, speed);
@@ -778,6 +824,25 @@ function burst(x, y, color, n = 14, speed = 160) {
     if (n >= 10) {
         G.rings.push({ x, y, r: 4, max: speed * 0.35, life: 0.35, total: 0.35, color });
         G.lights.push({ x, y, size: speed * 0.9, color, life: 0.25, total: 0.25 });
+    }
+}
+
+// Break a sprite into its own pixels, flung outward from its centre.
+function shatter(rows, x, y, scale, pal, force = 1) {
+    if (G.particles.length > 900) return;
+    const cw = rows[0].length, ch = rows.length;
+    for (let r = 0; r < ch; r++) {
+        for (let c = 0; c < cw; c++) {
+            const col = pal[rows[r][c]];
+            if (!col) continue;
+            if (G.fx === 'low' && (r + c) % 2) continue;
+            const dx = c - cw / 2 + 0.5, dy = r - ch / 2 + 0.5;
+            G.particles.push({
+                x: x + c * scale, y: y + r * scale,
+                vx: dx * 28 * force + rand(-30, 30), vy: dy * 28 * force - rand(30, 90) * force,
+                life: rand(0.45, 0.85), max: 0.85, color: col, size: scale, spark: false,
+            });
+        }
     }
 }
 
@@ -833,8 +898,8 @@ function killInvader(inv) {
     const pts = INVADER_TYPES[inv.type].points * multiplier();
     addScore(pts);
     const cx = inv.x + inv.w / 2, cy = inv.y + inv.h / 2;
-    G.corpses.push({ x: cx - SPR.burst[inv.type].width / 2, y: cy - SPR.burst[inv.type].height / 2, spr: SPR.burst[inv.type], life: 0.22 });
-    burst(cx, cy, INVADER_TYPES[inv.type].color, 10);
+    shatter(PIX[inv.type][G.fleetFrame], inv.x, inv.y, SCALE, PAL[inv.type]);
+    burst(cx, cy, INVADER_TYPES[inv.type].color, 10, 120);
     popup(cx, inv.y, multiplier() > 1 ? pts + ' x' + multiplier() : String(pts), INVADER_TYPES[inv.type].color);
     dropPowerup(cx, cy);
     Sound.invaderHit();
@@ -883,8 +948,8 @@ function toggleMute() {
     saveSettings();
 }
 
-const PAUSE_MENU = ['RESUME', 'RESTART', 'SOUND', 'MUSIC', 'QUIT TO TITLE'];
-const MENU_Y0 = H / 2 - 20;
+const PAUSE_MENU = ['RESUME', 'RESTART', 'SOUND', 'MUSIC', 'EFFECTS', 'QUIT TO TITLE'];
+const MENU_Y0 = H / 2 - 50;
 const MENU_DY = 34;
 function menuMove(dir) {
     G.menuIdx = (G.menuIdx + dir + PAUSE_MENU.length) % PAUSE_MENU.length;
@@ -896,7 +961,8 @@ function menuSelect() {
         case 1: startGame(); break;
         case 2: toggleMute(); break;
         case 3: Music.enabled = !Music.enabled; saveSettings(); Sound.blip(); break;
-        case 4: quitToTitle(); break;
+        case 4: G.fx = G.fx === 'high' ? 'low' : 'high'; G.fxLocked = true; saveSettings(); Sound.blip(); break;
+        case 5: quitToTitle(); break;
     }
 }
 function quitToTitle() {
@@ -942,6 +1008,16 @@ function spawnEnemyBullet(x, y, vx, vy) {
 function update(dt) {
     G.time += dt;
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
+    if (G.hurt > 0) G.hurt = Math.max(0, G.hurt - dt * 1.4);
+    if (G.state !== 'paused') {
+        G.meteorTimer -= dt;
+        if (G.meteorTimer <= 0) {
+            G.meteors.push({ x: rand(W * 0.3, W + 60), y: rand(-30, H * 0.35), vx: -rand(380, 560), vy: rand(140, 240), life: 1.6 });
+            G.meteorTimer = rand(6, 14);
+        }
+        for (const m of G.meteors) { m.x += m.vx * dt; m.y += m.vy * dt; m.life -= dt; }
+        G.meteors = G.meteors.filter(m => m.life > 0 && m.x > -120 && m.y < H);
+    }
     if (G.flash > 0) G.flash = Math.max(0, G.flash - dt * 4);
 
     // Cosmetics run in every state so explosions finish.
@@ -1232,7 +1308,8 @@ function killBoss() {
     const bs = G.boss;
     const pts = bs.points;
     addScore(pts);
-    burst(bs.x + bs.w / 2, bs.y + bs.h / 2, COLORS.boss, 80, 320);
+    shatter(PIX.boss, bs.x, bs.y, SCALE + 1, PAL.boss, 1.4);
+    burst(bs.x + bs.w / 2, bs.y + bs.h / 2, COLORS.boss, 50, 320);
     burst(bs.x + bs.w / 2, bs.y + bs.h / 2, '#fff', 30, 200);
     G.corpses.push({ x: bs.x + bs.w / 2 - SPR.burst.boss.width / 2, y: bs.y + bs.h / 2 - SPR.burst.boss.height / 2, spr: SPR.burst.boss, life: 0.5 });
     popup(bs.x + bs.w / 2, bs.y, String(pts), COLORS.boss, 2);
@@ -1252,6 +1329,8 @@ function hitPlayer() {
         burst(player.x + player.w / 2, player.y, POWERUPS.shield.color, 20, 200);
         popup(player.x + player.w / 2, player.y - 20, 'SHIELD DOWN', POWERUPS.shield.color);
         Sound.shieldHit();
+        G.hurt = 0.6;
+        G.hurtTex = HURT.green;
         player.invuln = 0.6;
         return true;
     }
@@ -1285,7 +1364,10 @@ function killPlayer(invaded) {
     if (G.state !== 'playing') return;
     G.waveLostLife = true;
     const p = G.player;
-    burst(p.x + p.w / 2, p.y + p.h / 2, COLORS.player, 40, 260);
+    shatter(PIX.player, p.x, p.y, SCALE, PAL.player, 1.6);
+    burst(p.x + p.w / 2, p.y + p.h / 2, COLORS.player, 24, 260);
+    G.hurt = 1;
+    G.hurtTex = HURT.red;
     Sound.playerHit();
     shakeScreen(8);
     G.lives -= invaded ? G.lives : 1;
@@ -1395,6 +1477,24 @@ function drawBackground() {
         } else {
             ctx.fillRect(st.x, st.y, sz, sz);
         }
+    }
+    if (G.meteors.length) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineWidth = 2;
+        for (const m of G.meteors) {
+            const a = clamp(m.life / 0.6, 0, 1);
+            const tx = m.x - m.vx * 0.2, ty = m.y - m.vy * 0.2;
+            const grad = ctx.createLinearGradient(m.x, m.y, tx, ty);
+            grad.addColorStop(0, `rgba(220,240,255,${(0.9 * a).toFixed(2)})`);
+            grad.addColorStop(1, 'rgba(220,240,255,0)');
+            ctx.strokeStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(m.x, m.y);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+            drawLight(m.x, m.y, 18, '#cfe8ff', a);
+        }
+        ctx.globalCompositeOperation = 'source-over';
     }
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(PLANET, 0, H - 160);
@@ -1646,10 +1746,39 @@ function drawScoreboard(y, highlight) {
     });
 }
 
+// A band of light sweeping across the logo: the title is drawn as a mask,
+// the band is kept only where the letters are, then added on top.
+function drawTitleShine() {
+    const g = titleCtx;
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, W, 160);
+    g.font = `bold 56px ${FONT}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#fff';
+    g.fillText('SPACE', W / 2, 50);
+    g.fillText('INVADERS', W / 2, 115);
+    g.globalCompositeOperation = 'source-in';
+    const bx = ((G.time * 260) % (W + 500)) - 250;
+    const band = g.createLinearGradient(bx - 90, 0, bx + 90, 0);
+    band.addColorStop(0, 'rgba(255,255,255,0)');
+    band.addColorStop(0.5, 'rgba(255,255,255,0.85)');
+    band.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = band;
+    g.fillRect(0, 0, W, 160);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(TITLE, 0, 40, W, 160);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = 'source-over';
+}
+
 function drawStartScreen() {
     dim(0.55);
     text('SPACE', W / 2, 90, 56, COLORS.player);
     text('INVADERS', W / 2, 155, 56, COLORS.player);
+    drawTitleShine();
 
     const rows = [
         [SPR.ufo, '= ? MYSTERY', COLORS.ufo],
@@ -1710,9 +1839,9 @@ function drawNameEntry() {
 function drawOverlay() {
     if (G.state === 'paused') {
         dim(0.7);
-        text('PAUSED', W / 2, H / 2 - 90, 40, '#fff');
+        text('PAUSED', W / 2, H / 2 - 115, 40, '#fff');
         PAUSE_MENU.forEach((item, i) => {
-            const label = item === 'SOUND' ? 'SOUND: ' + (Sound.muted ? 'OFF' : 'ON') : item === 'MUSIC' ? 'MUSIC: ' + (Music.enabled ? 'ON' : 'OFF') : item;
+            const label = item === 'SOUND' ? 'SOUND: ' + (Sound.muted ? 'OFF' : 'ON') : item === 'MUSIC' ? 'MUSIC: ' + (Music.enabled ? 'ON' : 'OFF') : item === 'EFFECTS' ? 'EFFECTS: ' + G.fx.toUpperCase() : item;
             const sel = i === G.menuIdx;
             text((sel ? '▶ ' : '') + label, W / 2, MENU_Y0 + i * MENU_DY, 16, sel ? '#ffd25a' : '#fff');
         });
@@ -1744,6 +1873,29 @@ function drawOverlay() {
     }
 }
 
+function applyBloom() {
+    if (G.fx !== 'high') return;
+    bloomA.globalCompositeOperation = 'copy';
+    bloomA.imageSmoothingEnabled = true;
+    bloomA.drawImage(canvas, 0, 0, W / 2, H / 2);
+    // B and C each hold the frame squared: bright stays bright, mid-tones fade.
+    for (const [g, w, h] of [[bloomB, W / 4, H / 4], [bloomC, W / 8, H / 8]]) {
+        g.imageSmoothingEnabled = true;
+        g.globalCompositeOperation = 'copy';
+        g.drawImage(BLOOM_A, 0, 0, w, h);
+        g.globalCompositeOperation = 'multiply';
+        g.drawImage(BLOOM_A, 0, 0, w, h);
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = 0.35;
+    ctx.drawImage(BLOOM_B, 0, 0, W, H);
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(BLOOM_C, 0, 0, W, H);
+    ctx.restore();
+}
+
 function drawScanlines() {
     ctx.drawImage(CRT, 0, 0, W, H);
     if (G.flash > 0) {
@@ -1765,6 +1917,14 @@ function draw() {
         drawOverlay();
     }
     ctx.restore();
+    applyBloom();
+    if (G.hurt > 0 && G.hurtTex) {
+        ctx.globalAlpha = G.hurt;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(G.hurtTex, 0, 0, W, H);
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = 1;
+    }
     drawScanlines();
     if (G.toast) {
         ctx.globalAlpha = clamp(G.toast.life, 0, 1);
@@ -1957,9 +2117,26 @@ buildTouchControls();
 let last = performance.now();
 let acc = 0;
 const STEP = 1 / 120;
+// If play runs under ~40 fps for three seconds and the player hasn't chosen
+// an effects level, drop to low effects once.
+const perf = { t: 0, frames: 0 };
+function watchPerformance(rawDt) {
+    if (G.fx !== 'high' || G.fxLocked || G.state !== 'playing' || rawDt <= 0 || rawDt > 0.25) return;
+    perf.t += rawDt;
+    perf.frames += 1;
+    if (perf.t < 3) return;
+    if (perf.t / perf.frames > 1 / 40) {
+        G.fx = 'low';
+        toast('EFFECTS LOWERED FOR SMOOTHNESS');
+    }
+    perf.t = 0;
+    perf.frames = 0;
+}
+
 function frame(now) {
     let dt = (now - last) / 1000;
     last = now;
+    watchPerformance(dt);
     if (dt > 0.1) dt = 0.1;
     acc += dt;
     pollGamepad();
@@ -1973,5 +2150,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance };
 })();

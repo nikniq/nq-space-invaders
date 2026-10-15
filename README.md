@@ -20,6 +20,8 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - **Share your score** from the game-over screen (system share sheet or clipboard)
 - Muzzle flash, thruster flames and wave-clear fireworks
 - **Graphics**: bevelled, glowing pixel sprites; scrolling parallax starfield over a nebula with a planet on the horizon; warp-speed star streaks between waves; additive-light explosions with sparks and shockwave rings; glowing bolts with trails; shaded bunkers; boss engine lights and damage smoke; waves slide in from the sides; CRT scanlines and vignette; sharp on high-DPI screens
+- **Bloom** post-processing, invaders with glowing eyes, a detailed player ship with cockpit, lit boss windows, pixel-shatter deaths, bunker debris, shooting stars, coloured hit vignettes, and a light sweep across the title
+- **Effects: High / Low** in the pause menu. Low drops bloom and sprite glow; the game switches to Low on its own if it runs below about 40 fps, unless you have picked a level yourself
 - **Installable** as an app and playable offline (web manifest + service worker)
 - Keyboard, gamepad and on-screen touch controls; scales to any screen; fullscreen toggle
 
