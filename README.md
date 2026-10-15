@@ -3,17 +3,20 @@
 A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SVG-based sprites, served by a Laravel application.
 
 ## Features
-- Smooth player and invader animations
-- SVG-based graphics for crisp visuals
-- Score tracking
-- Game over detection
-- Responsive controls
+- Pixel-art sprites: three invader types (30/20/10 points) with two-frame animation, a mystery UFO worth 50–300, and a classic green cannon
+- Fleet marches in steps and speeds up as it thins; each wave starts faster and lower
+- Invaders fire back, with destructible bunkers to hide behind
+- Three lives, wave bonus, score popups, particle explosions and screen shake
+- WebAudio sound effects (shoot, hits, the four-note march, UFO warble) with a mute toggle
+- Start, pause, and game-over screens with instant restart; auto-pauses when the tab loses focus
+- High score saved in the browser
+- Scales to any screen; on-screen touch controls on phones and tablets
 
 ## How to Play
-- Use **Left** and **Right** arrow keys to move the player
-- Press **Space** to shoot
-- Destroy all invaders to advance to the next wave
-- Avoid letting invaders reach your ship
+- **Left/Right** arrows (or **A/D**) move, **Space** fires
+- **Enter** starts or restarts, **P** or **Esc** pauses, **M** mutes
+- On touch devices use the on-screen buttons; tap the game to start
+- Clear the fleet to advance; lose a life when hit, and the game ends if the invaders reach you
 
 ## Project Layout
 This is a standard Laravel project with one difference: the web root is `public_html` instead of `public`
