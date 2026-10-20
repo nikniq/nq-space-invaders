@@ -375,9 +375,14 @@ const POWERUPS = {
     rapid: { letter: 'R', color: '#5ad7ff', label: 'RAPID FIRE', weight: 4, duration: 9 },
     spread: { letter: 'S', color: '#ff6ad5', label: 'SPREAD SHOT', weight: 3, duration: 9 },
     shield: { letter: 'H', color: '#3cff5a', label: 'SHIELD', weight: 3, duration: 20 },
+    pierce: { letter: 'P', color: '#ffb05a', label: 'PIERCING', weight: 3, duration: 9 },
+    bomb: { letter: 'B', color: '#ff5a5a', label: 'BOMB', weight: 2, duration: 0 },
     life: { letter: 'L', color: '#ffd25a', label: '+1 LIFE', weight: 1, duration: 0 },
 };
-const POWERUP_DROP_CHANCE = 0.09;
+const POWERUP_DROP_CHANCE = 0.11;
+const POWERUP_PITY = 14; // a drop is guaranteed after this many kills without one
+const CHAIN_WINDOW = 1.8; // seconds between kills to keep a chain alive
+const CHAIN_NAMES = ['', '', '', 'NICE!', 'GREAT!', 'EXCELLENT!', 'AWESOME!', 'INCREDIBLE!', 'UNSTOPPABLE!'];
 
 // Difficulty presets, chosen on the title screen and remembered.
 const DIFFS = {
@@ -415,7 +420,13 @@ const Sound = {
         osc.stop(t + dur + 0.02);
     },
     shoot() { this.tone(900, 0.12, { slide: 200, vol: 0.06 }); },
-    invaderHit() { this.tone(160, 0.18, { type: 'sawtooth', slide: 40, vol: 0.1 }); },
+    invaderHit(chain = 0) {
+        const c = Math.min(chain, 24);
+        this.tone(160 + c * 6, 0.18, { type: 'sawtooth', slide: 40, vol: 0.1 });
+        if (c >= 2) this.tone(520 * Math.pow(2, Math.min(c, 16) / 12), 0.07, { type: 'square', vol: 0.03 });
+    },
+    chain(m) { [0, 4, 7, 12].forEach((st, i) => this.tone(440 * Math.pow(2, (st + m * 2) / 12), 0.12, { type: 'square', vol: 0.06, delay: i * 0.05 })); },
+    tally(i) { this.tone(660 + i * 110, 0.09, { type: 'square', vol: 0.06 }); this.tone(1320 + i * 220, 0.05, { type: 'triangle', vol: 0.04, delay: 0.04 }); },
     playerHit() {
         this.tone(220, 0.6, { type: 'sawtooth', slide: 30, vol: 0.14 });
         this.tone(110, 0.8, { type: 'square', slide: 20, vol: 0.1 });
@@ -688,6 +699,18 @@ const G = {
     meteorTimer: 5,
     fx: 'high',      // high | low; low drops bloom and sprite glow
     fxLocked: false, // true once the player picks a level by hand
+    comboTimer: 0,
+    fireCooldown: 0,
+    hitstop: 0,
+    banner: null,
+    displayScore: 0,
+    scorePulse: 0,
+    prevBest: 0,
+    killsSinceDrop: 0,
+    waveStats: { shots: 0, hits: 0, bestChain: 0 },
+    tally: null,
+    tallyShown: 0,
+    tallyTotal: 3.4,
 };
 G.hiScore = G.scores.length ? G.scores[0].score : 0;
 {
@@ -701,17 +724,39 @@ G.hiScore = G.scores.length ? G.scores[0].score : 0;
     G.reduceMotion = mm('(prefers-reduced-motion: reduce)');
 }
 
-const input = { left: false, right: false, fire: false, firePressed: false };
+const input = { left: false, right: false, fire: false, firePressed: false, fireBuffer: 0, lastDir: 0 };
 
 for (let i = 0; i < 100; i++) {
     G.stars.push({ x: Math.random() * W, y: Math.random() * H, z: i < 60 ? 0 : i < 80 ? 1 : 2, p: Math.random() * Math.PI * 2 });
 }
 
-function multiplier() { return 1 + Math.min(3, Math.floor(G.combo / 5)); }
+function multiplier() { return Math.min(8, 1 + Math.floor(G.combo / 4)); }
+
+// Every hit extends the chain. Reaching a new multiplier from x3 up
+// announces itself with a banner and a rising chime.
+function chainUp() {
+    const before = multiplier();
+    G.combo += 1;
+    G.comboTimer = CHAIN_WINDOW;
+    G.comboBest = Math.max(G.comboBest, G.combo);
+    G.waveStats.bestChain = Math.max(G.waveStats.bestChain, G.combo);
+    G.stats.hits += 1;
+    G.waveStats.hits += 1;
+    const m = multiplier();
+    if (m > before && m >= 3) {
+        const colors = ['', '', '', '#5ad7ff', COLORS.player, '#ffd25a', '#ff8c3b', '#ff6ad5', '#ff3b3b'];
+        banner(CHAIN_NAMES[m] + '  x' + m, colors[m], 26 + m * 2);
+        Sound.chain(m);
+    }
+}
+
+function banner(text, color, size = 28) {
+    G.banner = { text, color, size, life: 1.2, total: 1.2 };
+}
 function isBossWave(w = G.wave) { return w % BOSS_EVERY === 0; }
 
 function makePlayer() {
-    return { x: W / 2 - SPR.player.width / 2, y: H - 70, w: SPR.player.width, h: SPR.player.height, speed: 260, invuln: 2.0 };
+    return { x: W / 2 - SPR.player.width / 2, y: H - 70, w: SPR.player.width, h: SPR.player.height, speed: 340, invuln: 2.0 };
 }
 
 function makeFleet() {
@@ -776,6 +821,11 @@ function startGame() {
     G.shield = 0;
     G.lastEntry = null;
     G.stats = { shots: 0, hits: 0 };
+    G.displayScore = 0;
+    G.prevBest = G.hiScore;
+    G.killsSinceDrop = 0;
+    G.banner = null;
+    G.comboTimer = 0;
     startWave();
     getReady(2.2);
 }
@@ -791,6 +841,8 @@ function startWave() {
     G.powerups = [];
     G.enemyFireTimer = 1.5;
     G.waveLostLife = false;
+    G.waveStats = { shots: 0, hits: 0, bestChain: 0 };
+    G.fireCooldown = 0;
     G.waveIntro = true;
     G.diveTimer = rand(4, 7);
     G.ufo = null;
@@ -800,8 +852,13 @@ function startWave() {
 
 function addScore(n) {
     G.score += n;
+    G.scorePulse = 1;
     if (G.score > G.hiScore) {
         G.hiScore = G.score;
+        if (!G.newHiScore && G.prevBest > 0) {
+            banner('NEW HIGH SCORE!', '#ffd25a', 30);
+            Sound.extraLife();
+        }
         G.newHiScore = true;
     }
     while (G.score >= G.nextLifeAt) {
@@ -846,12 +903,14 @@ function shatter(rows, x, y, scale, pal, force = 1) {
     }
 }
 
-function popup(x, y, text, color = '#fff', life = 1.0) {
-    G.popups.push({ x, y, text, color, life, max: life });
+function popup(x, y, text, color = '#fff', life = 1.0, size = 14) {
+    G.popups.push({ x, y, text, color, life, max: life, size });
 }
 
 function dropPowerup(x, y) {
-    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop) return;
+    G.killsSinceDrop += 1;
+    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop && G.killsSinceDrop < POWERUP_PITY) return;
+    G.killsSinceDrop = 0;
     const total = Object.values(POWERUPS).reduce((s, p) => s + p.weight, 0);
     let r = Math.random() * total;
     let type = 'rapid';
@@ -868,47 +927,76 @@ function applyPowerup(type) {
         G.lives = Math.min(MAX_LIVES, G.lives + 1);
     } else if (type === 'shield') {
         G.shield = def.duration;
+    } else if (type === 'bomb') {
+        detonateBomb();
     } else {
         G.power = { type, timer: def.duration };
     }
 }
 
+// Shots allowed on screen and the minimum gap between them.
+const FIRE_COOLDOWN = 0.2;
+const RAPID_COOLDOWN = 0.085;
+const FIRE_BUFFER = 0.15; // a press this close to the next allowed shot still counts
+
+// Bomb: destroys the lowest invader in every column, clears enemy fire,
+// and takes a chunk out of a boss.
+function detonateBomb() {
+    const p = G.player;
+    const cols = {};
+    for (const inv of G.invaders) {
+        if (inv.alive && (!cols[inv.col] || inv.y > cols[inv.col].y)) cols[inv.col] = inv;
+    }
+    for (const inv of Object.values(cols)) killInvader(inv);
+    for (const eb of G.enemyBullets) burst(eb.x, eb.y, '#ffd25a', 3, 60);
+    G.enemyBullets = [];
+    if (G.boss) {
+        G.boss.hp -= 4;
+        G.boss.flash = 0.2;
+        if (G.boss.hp <= 0) killBoss();
+    }
+    G.rings.push({ x: p.x + p.w / 2, y: p.y, r: 10, max: 700, life: 0.6, total: 0.6, color: POWERUPS.bomb.color });
+    G.lights.push({ x: p.x + p.w / 2, y: p.y, size: 600, color: POWERUPS.bomb.color, life: 0.35, total: 0.35 });
+    shakeScreen(10);
+    G.flash = G.reduceMotion ? 0.3 : 0.8;
+    G.hitstop = Math.max(G.hitstop, 0.08);
+    Sound.bossDie();
+}
+
 function fire() {
     const p = G.player;
-    const maxShots = G.power.type === 'rapid' ? 3 : 1;
-    if (G.playerBullets.length >= maxShots) return;
-    const mk = (dx, vx) => ({ x: p.x + p.w / 2 - 2 + dx, y: p.y - 12, w: 4, h: 12, vx, vy: -560 });
+    const maxShots = G.power.type === 'rapid' ? 8 : G.power.type === 'spread' ? 6 : 2;
+    if (G.playerBullets.length >= maxShots) return false;
+    const mk = (dx, vx) => ({ x: p.x + p.w / 2 - 2 + dx, y: p.y - 12, w: 4, h: 12, vx, vy: -720, pierce: G.power.type === 'pierce' });
     if (G.power.type === 'spread') {
-        if (G.playerBullets.length) return;
         G.playerBullets.push(mk(0, 0), mk(-6, -170), mk(6, 170));
-        G.stats.shots += 3;
+        countShots(3);
     } else {
         G.playerBullets.push(mk(0, 0));
-        G.stats.shots += 1;
+        countShots(1);
     }
     burst(p.x + p.w / 2, p.y - 4, '#e8ffe8', 4, 90);
     Sound.shoot();
+    return true;
 }
+
+function countShots(n) { G.stats.shots += n; G.waveStats.shots += n; }
 
 function killInvader(inv) {
     inv.alive = false;
-    G.combo += 1;
-    G.stats.hits += 1;
-    G.comboBest = Math.max(G.comboBest, G.combo);
+    chainUp();
     const pts = INVADER_TYPES[inv.type].points * multiplier();
     addScore(pts);
     const cx = inv.x + inv.w / 2, cy = inv.y + inv.h / 2;
     shatter(PIX[inv.type][G.fleetFrame], inv.x, inv.y, SCALE, PAL[inv.type]);
     burst(cx, cy, INVADER_TYPES[inv.type].color, 10, 120);
-    popup(cx, inv.y, multiplier() > 1 ? pts + ' x' + multiplier() : String(pts), INVADER_TYPES[inv.type].color);
+    popup(cx, inv.y, String(pts), multiplier() >= 4 ? '#ffd25a' : INVADER_TYPES[inv.type].color, 1.0, 12 + Math.min(10, pts / 15));
     dropPowerup(cx, cy);
-    Sound.invaderHit();
+    Sound.invaderHit(G.combo);
 }
 
-function missShot() {
-    if (G.combo >= 5) popup(G.player.x + G.player.w / 2, G.player.y - 30, 'COMBO LOST', '#888', 0.8);
-    G.combo = 0;
-}
+// Misses cost accuracy only; chains end when the chain timer runs out.
+function missShot() {}
 
 // ---------------------------------------------------------------------------
 // Flow helpers: ready countdown, movement, settings, pause menu
@@ -927,11 +1015,11 @@ function movePlayer(dt) {
     if (G.targetX !== null) {
         const want = clamp(G.targetX - p.w / 2, 8, W - p.w - 8);
         const d = want - p.x;
-        const step = p.speed * 1.7 * dt;
+        const step = 1200 * dt;
         p.x += Math.abs(d) <= step ? d : Math.sign(d) * step;
     } else {
-        if (input.left) p.x -= p.speed * dt;
-        if (input.right) p.x += p.speed * dt;
+        const dir = input.left && input.right ? input.lastDir : input.left ? -1 : input.right ? 1 : 0;
+        p.x += dir * p.speed * dt;
     }
     p.x = clamp(p.x, 8, W - p.w - 8);
 }
@@ -1009,6 +1097,10 @@ function update(dt) {
     G.time += dt;
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
     if (G.hurt > 0) G.hurt = Math.max(0, G.hurt - dt * 1.4);
+    if (G.displayScore < G.score) G.displayScore = Math.min(G.score, G.displayScore + Math.max(60 * dt, (G.score - G.displayScore) * dt * 7));
+    else G.displayScore = G.score;
+    if (G.scorePulse > 0) G.scorePulse = Math.max(0, G.scorePulse - dt * 4);
+    if (G.banner) { G.banner.life -= dt; if (G.banner.life <= 0) G.banner = null; }
     if (G.state !== 'paused') {
         G.meteorTimer -= dt;
         if (G.meteorTimer <= 0) {
@@ -1066,7 +1158,14 @@ function update(dt) {
             burst(rand(80, W - 80), rand(70, 320), colors[Math.floor(Math.random() * colors.length)], 26, 230);
             G.fireworkTimer = 0.2;
         }
+        const elapsed = G.tallyTotal - G.stateTimer;
+        while (G.tally && G.tallyShown < G.tally.length && (elapsed >= 0.45 + G.tallyShown * 0.4 || G.stateTimer <= 0)) {
+            addScore(G.tally[G.tallyShown].value);
+            G.tallyShown += 1;
+            Sound.tally(G.tallyShown);
+        }
         if (G.stateTimer <= 0) {
+            G.tally = null;
             G.wave += 1;
             startWave();
             getReady(1.8);
@@ -1091,12 +1190,24 @@ function update(dt) {
         if (G.power.timer <= 0) G.power = { type: null, timer: 0 };
     }
     if (G.shield > 0) G.shield = Math.max(0, G.shield - dt);
+    if (G.combo > 0) {
+        G.comboTimer -= dt;
+        if (G.comboTimer <= 0) {
+            if (G.combo >= 8) popup(player.x + player.w / 2, player.y - 30, 'CHAIN ' + G.combo, '#9ad', 1.0);
+            G.combo = 0;
+        }
+    }
 
     movePlayer(dt);
 
     // Player fire — edge-triggered; rapid fire also autofires while held.
-    if (input.firePressed || (G.power.type === 'rapid' && input.fire)) fire();
-    input.firePressed = false;
+    if (input.firePressed) { input.fireBuffer = FIRE_BUFFER; input.firePressed = false; }
+    G.fireCooldown -= dt;
+    if ((input.fireBuffer > 0 || input.fire) && G.fireCooldown <= 0 && fire()) {
+        input.fireBuffer = 0;
+        G.fireCooldown = G.power.type === 'rapid' ? RAPID_COOLDOWN : FIRE_COOLDOWN;
+    }
+    input.fireBuffer = Math.max(0, input.fireBuffer - dt);
 
     // Player bullets
     for (const b of G.playerBullets) {
@@ -1104,15 +1215,14 @@ function update(dt) {
         b.x += b.vx * dt;
         if (b.y + b.h < 0 || b.x < -10 || b.x > W + 10) { b.dead = true; missShot(); continue; }
         for (const inv of G.invaders) {
-            if (inv.alive && overlaps(b, inv)) { killInvader(inv); b.dead = true; break; }
+            if (inv.alive && overlaps(b, inv)) { killInvader(inv); if (!b.pierce) { b.dead = true; break; } }
         }
         if (b.dead) continue;
         if (G.boss && overlaps(b, G.boss)) {
             b.dead = true;
             G.boss.hp -= 1;
             G.boss.flash = 0.08;
-            G.combo += 1;
-            G.stats.hits += 1;
+            chainUp();
             burst(b.x, b.y, COLORS.boss, 5, 100);
             Sound.bossHit();
             if (G.boss.hp <= 0) killBoss();
@@ -1120,13 +1230,13 @@ function update(dt) {
         }
         if (G.ufo && overlaps(b, G.ufo)) {
             const pts = G.ufo.points * multiplier();
-            G.combo += 1;
-            G.stats.hits += 1;
+            chainUp();
             addScore(pts);
             G.corpses.push({ x: G.ufo.x + G.ufo.w / 2 - SPR.burst.ufo.width / 2, y: G.ufo.y, spr: SPR.burst.ufo, life: 0.3 });
             burst(G.ufo.x + G.ufo.w / 2, G.ufo.y + G.ufo.h / 2, COLORS.ufo, 30, 240);
             popup(G.ufo.x + G.ufo.w / 2, G.ufo.y, String(pts), COLORS.ufo, 1.4);
             Sound.ufoHit();
+            G.hitstop = 0.06;
             G.ufo = null;
             b.dead = true;
             continue;
@@ -1289,16 +1399,17 @@ function update(dt) {
     // Wave cleared
     if (alive.length === 0 && !G.boss) {
         G.state = 'wavecleared';
-        G.stateTimer = 2.0;
+        G.stateTimer = G.tallyTotal;
         G.playerBullets = [];
         G.enemyBullets = [];
         G.ufo = null;
-        addScore(100 * G.wave);
-        popup(W / 2, H / 2 + 40, 'WAVE BONUS ' + (100 * G.wave), '#ffd25a', 1.8);
-        if (!G.waveLostLife) {
-            addScore(50 * G.wave);
-            popup(W / 2, H / 2 + 70, 'PERFECT! +' + (50 * G.wave), COLORS.player, 2.0);
-        }
+        const ws = G.waveStats;
+        const acc = ws.shots ? Math.min(1, ws.hits / ws.shots) : 0;
+        G.tally = [{ label: 'WAVE CLEAR', value: 100 * G.wave }];
+        G.tally.push({ label: 'ACCURACY ' + Math.round(acc * 100) + '%', value: Math.round(acc * 100) * 2 * G.wave });
+        if (!G.waveLostLife) G.tally.push({ label: 'NO DAMAGE', value: 100 * G.wave });
+        if (ws.bestChain >= 5) G.tally.push({ label: 'BEST CHAIN ' + ws.bestChain, value: ws.bestChain * 5 * G.wave });
+        G.tallyShown = 0;
         G.fireworkTimer = 0;
         Sound.wave();
     }
@@ -1317,6 +1428,7 @@ function killBoss() {
     G.flash = G.reduceMotion ? 0.3 : 1;
     G.boss = null;
     Sound.bossDie();
+    G.hitstop = 0.3;
 }
 
 // A hit on the player. Returns true if it was absorbed (invincible or
@@ -1369,6 +1481,7 @@ function killPlayer(invaded) {
     G.hurt = 1;
     G.hurtTex = HURT.red;
     Sound.playerHit();
+    G.hitstop = 0.12;
     shakeScreen(8);
     G.lives -= invaded ? G.lives : 1;
     G.playerBullets = [];
@@ -1503,14 +1616,31 @@ function drawBackground() {
 
 function drawHud() {
     text('SCORE', 24, 20, 12, '#9ad', 'left');
-    text(pad(G.score), 24, 40, 18, '#fff', 'left');
+    text(pad(Math.floor(G.displayScore)), 24, 40, Math.round(18 + G.scorePulse * 5), G.scorePulse > 0.2 ? '#ffd25a' : '#fff', 'left');
     text('HI-SCORE', W / 2, 20, 12, '#9ad');
     text(pad(G.hiScore), W / 2, 40, 18, G.newHiScore ? '#ffd25a' : '#fff');
     text('WAVE', W - 24, 20, 12, '#9ad', 'right');
     text(String(G.wave), W - 24, 40, 18, '#fff', 'right');
 
-    if (multiplier() > 1) {
-        text('COMBO x' + multiplier(), 24, 62, 12, '#ffd25a', 'left');
+    // Chain meter: count, multiplier and time left to keep it going.
+    if (G.combo >= 2) {
+        const m = multiplier();
+        const col = m >= 6 ? '#ff6ad5' : m >= 4 ? '#ffd25a' : m >= 2 ? COLORS.player : '#9ad';
+        text('CHAIN ' + G.combo + (m > 1 ? '  x' + m : ''), 24, 62, 12, col, 'left');
+        ctx.fillStyle = '#222';
+        ctx.fillRect(24, 72, 130, 4);
+        ctx.fillStyle = col;
+        ctx.fillRect(24, 72, 130 * clamp(G.comboTimer / CHAIN_WINDOW, 0, 1), 4);
+    }
+
+    // Milestone banner
+    if (G.banner) {
+        const b = G.banner;
+        const age = b.total - b.life;
+        const pop = age < 0.12 ? 1.6 - age / 0.12 * 0.6 : 1;
+        ctx.globalAlpha = clamp(b.life / 0.3, 0, 1);
+        text(b.text, W / 2, H * 0.42, Math.round(b.size * pop), b.color);
+        ctx.globalAlpha = 1;
     }
 
     // Active power-up bars (timed weapon, then shield)
@@ -1645,7 +1775,7 @@ function drawPlayfield() {
     ctx.imageSmoothingEnabled = true;
     for (const b of G.playerBullets) {
         ctx.drawImage(TRAIL.player, Math.round(b.x), Math.round(b.y + b.h), b.w, 30);
-        drawLight(b.x + b.w / 2, b.y + 4, 26, '#8dffa0', 0.6);
+        drawLight(b.x + b.w / 2, b.y + 4, b.pierce ? 36 : 26, b.pierce ? '#ffb05a' : '#8dffa0', 0.6);
     }
     for (const eb of G.enemyBullets) {
         ctx.drawImage(TRAIL.enemy, Math.round(eb.x), Math.round(eb.y - 18), eb.w, 18);
@@ -1722,7 +1852,8 @@ function drawPlayfield() {
 
     for (const t of G.popups) {
         ctx.globalAlpha = clamp(t.life / Math.min(t.max, 1), 0, 1);
-        text(t.text, t.x, t.y, 14, t.color);
+        const grow = 1 + 0.35 * clamp((t.max - t.life) / 0.08, 0, 1) * clamp(t.life / t.max * 4, 0, 1);
+        text(t.text, t.x, t.y, Math.round((t.size || 14) * grow), t.color);
     }
     ctx.globalAlpha = 1;
 }
@@ -1792,7 +1923,7 @@ function drawStartScreen() {
         text(label, W / 2 - 190, y, 14, color, 'left');
     });
     Object.values(POWERUPS).forEach((def, i) => {
-        const y = 215 + i * 34;
+        const y = 207 + i * 26;
         ctx.strokeStyle = def.color;
         ctx.lineWidth = 2;
         ctx.strokeRect(W / 2 + 40, y - 10, 20, 20);
@@ -1800,7 +1931,7 @@ function drawStartScreen() {
         text(def.label, W / 2 + 72, y, 12, def.color, 'left');
     });
 
-    drawScoreboard(348);
+    drawScoreboard(362);
 
     // Difficulty selector
     const dy = 506;
@@ -1852,8 +1983,25 @@ function drawOverlay() {
         text('GET READY', W / 2, H / 2 + 6, 18, '#ffd25a');
         if (G.wave === 1 || G.inputMode === 'touch') text(hintText('controls'), W / 2, H / 2 + 46, 10, '#9ad');
     } else if (G.state === 'wavecleared') {
-        text('WAVE ' + G.wave + ' CLEARED', W / 2, H / 2 - 20, 32, COLORS.player);
-        if (isBossWave(G.wave + 1)) text('BOSS INCOMING', W / 2, H / 2 + 80, 16, COLORS.boss);
+        text('WAVE ' + G.wave + ' CLEARED', W / 2, H / 2 - 110, 32, COLORS.player);
+        if (G.tally) {
+            let total = 0;
+            G.tally.forEach((t, i) => {
+                if (i >= G.tallyShown) return;
+                const y = H / 2 - 50 + i * 30;
+                text(t.label, W / 2 - 170, y, 14, '#fff', 'left');
+                text('+' + t.value, W / 2 + 170, y, 14, '#ffd25a', 'right');
+                total += t.value;
+            });
+            if (G.tallyShown === G.tally.length) {
+                const y = H / 2 - 50 + G.tally.length * 30 + 10;
+                ctx.fillStyle = '#ffd25a';
+                ctx.fillRect(W / 2 - 170, y - 18, 340, 2);
+                text('TOTAL', W / 2 - 170, y + 4, 16, '#ffd25a', 'left');
+                text('+' + total, W / 2 + 170, y + 4, 18, '#ffd25a', 'right');
+            }
+        }
+        if (isBossWave(G.wave + 1)) text('BOSS INCOMING', W / 2, H / 2 + 125, 16, COLORS.boss);
     } else if (G.state === 'entername') {
         drawNameEntry();
     } else if (G.state === 'gameover') {
@@ -1965,11 +2113,13 @@ function pressLeft(down) {
     if (down && G.state === 'start') { cycleDifficulty(-1); return; }
     if (down && G.state === 'entername') { nameCycle(-1); return; }
     input.left = down;
+    if (down) input.lastDir = -1;
 }
 function pressRight(down) {
     if (down && G.state === 'start') { cycleDifficulty(1); return; }
     if (down && G.state === 'entername') { nameCycle(1); return; }
     input.right = down;
+    if (down) input.lastDir = 1;
 }
 function pressFire(down) {
     if (!down) { input.fire = false; return; }
@@ -2033,11 +2183,10 @@ canvas.addEventListener('pointerdown', e => {
     if (touchLike) G.inputMode = 'touch';
     Sound.init();
     if (G.state === 'playing' || G.state === 'ready') {
-        if (touchLike) {
-            canvasPointer = e.pointerId;
-            G.targetX = canvasPoint(e).x;
-            if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
-        }
+        canvasPointer = e.pointerId;
+        if (touchLike) G.targetX = canvasPoint(e).x;
+        if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
+        input.fire = true;
         if (G.state === 'playing') input.firePressed = true;
     } else if (G.state === 'paused') {
         const idx = Math.round((canvasPoint(e).y - MENU_Y0) / MENU_DY);
@@ -2051,7 +2200,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('pointermove', e => {
     if (canvasPointer === e.pointerId && G.targetX !== null) G.targetX = canvasPoint(e).x;
 });
-const releaseCanvas = e => { if (canvasPointer === e.pointerId) { canvasPointer = null; G.targetX = null; } };
+const releaseCanvas = e => { if (canvasPointer === e.pointerId) { canvasPointer = null; G.targetX = null; input.fire = false; } };
 canvas.addEventListener('pointerup', releaseCanvas);
 canvas.addEventListener('pointercancel', releaseCanvas);
 
@@ -2140,6 +2289,10 @@ function frame(now) {
     if (dt > 0.1) dt = 0.1;
     acc += dt;
     pollGamepad();
+    if (G.hitstop > 0) {
+        G.hitstop -= dt;
+        acc = 0;
+    }
     while (acc >= STEP) {
         update(STEP);
         acc -= STEP;
@@ -2150,5 +2303,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier };
 })();

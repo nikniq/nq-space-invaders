@@ -7,8 +7,10 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - Fleet marches in steps and speeds up as it thins; each wave starts faster and lower
 - Invaders fire back, with destructible bunkers to hide behind
 - **Boss every fifth wave**: a large saucer with a health bar that sweeps the top of the screen firing three-way volleys
-- **Power-ups** dropped by dying invaders: Rapid fire (R), Spread shot (S), Shield (H), extra life (L)
-- **Combo multiplier** up to x4 for consecutive hits; missing a shot resets it
+- **Power-ups** dropped by dying invaders: Rapid fire (R), Spread shot (S), Piercing bolts (P), Shield (H), Bomb (B, wipes out the lowest invader in every column), extra life (L). A drop is guaranteed if you go 14 kills without one
+- **Chains**: every hit within 1.8 seconds of the last extends your chain, raising the score multiplier up to x8 with NICE / GREAT / AWESOME / UNSTOPPABLE call-outs and a rising chime. Misses only cost accuracy
+- **Wave tally**: clearing a wave pays out bonuses one by one for the clear, your accuracy, taking no damage and your best chain
+- Score counts up in the HUD, point popups grow with the multiplier, a banner marks beating your previous best, and big moments (UFO, boss kill, bomb, death) land with a brief hit-stop
 - Three lives, bonus life every 1,500 points (max 5), respawn invincibility, wave bonus
 - Score popups, particle explosions, screen shake, CRT scanlines
 - WebAudio sound effects (shoot, hits, the four-note march, UFO warble, boss, power-ups) with a mute toggle
@@ -16,7 +18,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - **Top-5 leaderboard** with three-letter initials, saved in the browser
 - **Divers**: from wave 3, invaders peel off and swoop at you Galaga-style before rejoining the fleet
 - **Procedural chiptune soundtrack** that speeds up as the fleet thins (toggle in the pause menu)
-- **Perfect wave** bonus for clearing a wave without losing a life; accuracy and best combo shown at game over
+- Accuracy and best chain shown at game over
 - **Share your score** from the game-over screen (system share sheet or clipboard)
 - Muzzle flash, thruster flames and wave-clear fireworks
 - **Graphics**: bevelled, glowing pixel sprites; scrolling parallax starfield over a nebula with a planet on the horizon; warp-speed star streaks between waves; additive-light explosions with sparks and shockwave rings; glowing bolts with trails; shaded bunkers; boss engine lights and damage smoke; waves slide in from the sides; CRT scanlines and vignette; sharp on high-DPI screens
@@ -27,10 +29,11 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 
 ## How to Play
 - Pick **Easy / Normal / Hard** on the title screen with ← → (Easy gives four lives, slower and sparser enemy fire). Your choice and the mute setting are remembered.
-- **Left/Right** arrows (or **A/D**) move, **Space** fires (hold for autofire with Rapid)
+- **Left/Right** arrows (or **A/D**) move; if you hold both, the last one pressed wins
+- **Space** fires. Hold it to autofire; up to two bolts can be in flight, and a press made just before the next shot is ready is remembered rather than dropped
 - **Enter** starts or restarts, **P** or **Esc** opens the pause menu (Resume / Restart / Sound / Quit), **M** mutes, **F** toggles fullscreen
 - Gamepad: left stick or d-pad moves, A fires, Start pauses, d-pad navigates menus
-- Touch: **drag anywhere on the game to move** and tap to fire, or use the on-screen buttons; tap to start
+- Touch: **hold and drag anywhere on the game** to move and autofire, or use the on-screen buttons; tap to start. A mouse held on the game also autofires
 - Every wave and respawn starts with a short **Get Ready** countdown so you are never shot before you can react
 - Clear the fleet to advance; lose a life when hit, and the game ends if the invaders reach you
 - Catch falling capsules for power-ups; shoot the saucer for mystery points
@@ -38,6 +41,12 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - Press **C** (or tap the Share box) on the game-over screen to share your score
 - On a phone, use your browser's **Add to Home Screen** to install the game; it then works offline
 - The game pauses itself when the tab is hidden or loses focus, and honours the system reduced-motion setting (no screen shake)
+
+## Tests
+```bash
+php artisan test     # PHPUnit: the game page and its web-root assets
+npm run test:js      # Node's built-in runner: headless gameplay tests for public_html/space-invaders.js
+```
 
 ## Project Layout
 This is a standard Laravel project with one difference: the web root is `public_html` instead of `public`
