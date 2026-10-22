@@ -89,6 +89,44 @@ const PIX = {
         '.##..##..##.',
         '..##....##..',
     ]],
+    tank: [[
+        '...#####...',
+        '.#########.',
+        '##o#####o##',
+        '###########',
+        '#.#######.#',
+        '#.#.....#.#',
+        '..##...##..',
+        '.##.....##.',
+    ], [
+        '...#####...',
+        '.#########.',
+        '##o#####o##',
+        '###########',
+        '.#########.',
+        '..#.....#..',
+        '.#.#...#.#.',
+        '#.........#',
+    ]],
+    sniper: [[
+        '....#....',
+        '...###...',
+        '..#####..',
+        '.##ooo##.',
+        '#########',
+        '..#.#.#..',
+        '.#.....#.',
+        '#.......#',
+    ], [
+        '....#....',
+        '...###...',
+        '..#####..',
+        '.##ooo##.',
+        '#########',
+        '.#..#..#.',
+        '#.......#',
+        '.#.....#.',
+    ]],
     ufo: [
         '.....######.....',
         '...##########...',
@@ -230,6 +268,9 @@ const PAL = {
     squid: { '#': COLORS.squid, 'o': '#ff4060' },
     crab: { '#': COLORS.crab, 'o': '#ffe04a' },
     octopus: { '#': COLORS.octopus, 'o': '#7affff' },
+    tank: { '#': '#7f9cc4', 'o': '#ff4060' },
+    tankHurt: { '#': '#56677e', 'o': '#ff8c3b' },
+    sniper: { '#': '#ff3b6b', 'o': '#ffe04a' },
     boss: { '#': COLORS.boss, 'o': '#ffe08a' },
 };
 const SPR = {
@@ -237,6 +278,9 @@ const SPR = {
     squid: PIX.squid.map(f => renderSprite(f, PAL.squid, SCALE)),
     crab: PIX.crab.map(f => renderSprite(f, PAL.crab, SCALE)),
     octopus: PIX.octopus.map(f => renderSprite(f, PAL.octopus, SCALE)),
+    tank: PIX.tank.map(f => renderSprite(f, PAL.tank, SCALE)),
+    tankHurt: PIX.tank.map(f => renderSprite(f, PAL.tankHurt, SCALE)),
+    sniper: PIX.sniper.map(f => renderSprite(f, PAL.sniper, SCALE)),
     ufo: renderSprite(PIX.ufo, COLORS.ufo, SCALE),
     boss: renderSprite(PIX.boss, PAL.boss, SCALE + 1),
     bossFlash: renderSprite(PIX.boss, { '#': '#ffffff', 'o': '#ffffff' }, SCALE + 1),
@@ -359,6 +403,8 @@ const INVADER_TYPES = {
     squid: { frames: SPR.squid, points: 30, color: COLORS.squid },
     crab: { frames: SPR.crab, points: 20, color: COLORS.crab },
     octopus: { frames: SPR.octopus, points: 10, color: COLORS.octopus },
+    tank: { frames: SPR.tank, points: 40, color: '#7f9cc4', hp: 2 },
+    sniper: { frames: SPR.sniper, points: 50, color: '#ff3b6b' },
 };
 const ROW_TYPES = ['squid', 'crab', 'crab', 'octopus', 'octopus'];
 const COLS = 11;
@@ -382,6 +428,24 @@ const POWERUPS = {
 const POWERUP_DROP_CHANCE = 0.11;
 const POWERUP_PITY = 14; // a drop is guaranteed after this many kills without one
 const CHAIN_WINDOW = 1.8; // seconds between kills to keep a chain alive
+
+// Upgrades offered after every second wave and every boss. They stack for
+// the rest of the run.
+const PERKS = [
+    { id: 'twin', code: 'TW', name: 'TWIN CANNON', desc: 'ONE MORE BOLT IN FLIGHT', color: '#8dffa0', max: 2 },
+    { id: 'trigger', code: 'HT', name: 'HAIR TRIGGER', desc: 'FIRE 20% FASTER', color: '#5ad7ff', max: 3 },
+    { id: 'chain', code: 'CL', name: 'CHAIN LINK', desc: 'CHAINS LAST HALF A SECOND LONGER', color: '#ffd25a', max: 3 },
+    { id: 'overcharge', code: 'OC', name: 'OVERCHARGE', desc: 'POWER-UPS LAST 40% LONGER', color: '#ff6ad5', max: 2 },
+    { id: 'magnet', code: 'TB', name: 'TRACTOR BEAM', desc: 'POWER-UPS DRIFT TOWARD YOU', color: '#7affff', max: 1 },
+    { id: 'deflector', code: 'DF', name: 'DEFLECTOR', desc: 'START EVERY WAVE SHIELDED', color: '#3cff5a', max: 1 },
+    { id: 'thrusters', code: 'TH', name: 'THRUSTERS', desc: 'MOVE 15% FASTER', color: '#ff8c3b', max: 2 },
+    { id: 'lucky', code: 'LS', name: 'LUCKY STAR', desc: 'MORE POWER-UP DROPS', color: '#ffe04a', max: 2 },
+    { id: 'bounty', code: 'BH', name: 'BOUNTY HUNTER', desc: 'MORE UFOS, WORTH DOUBLE', color: '#ff3b3b', max: 1 },
+    { id: 'life', code: '+1', name: 'SPARE SHIP', desc: 'ONE EXTRA LIFE', color: '#ffd25a', max: 99 },
+];
+function perk(id) { return (G.perks && G.perks[id]) || 0; }
+function chainWindow() { return CHAIN_WINDOW + 0.5 * perk('chain'); }
+function powerupScale() { return 1 + 0.4 * perk('overcharge'); }
 const CHAIN_NAMES = ['', '', '', 'NICE!', 'GREAT!', 'EXCELLENT!', 'AWESOME!', 'INCREDIBLE!', 'UNSTOPPABLE!'];
 
 // Difficulty presets, chosen on the title screen and remembered.
@@ -441,6 +505,8 @@ const Sound = {
     extraLife() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.14, { vol: 0.09, delay: i * 0.1 })); },
     wave() { [440, 554, 659, 880].forEach((f, i) => this.tone(f, 0.15, { vol: 0.08, delay: i * 0.11 })); },
     blip() { this.tone(1200, 0.05, { type: 'square', vol: 0.04 }); },
+    clank() { this.tone(1800, 0.06, { type: 'square', vol: 0.05 }); this.tone(900, 0.1, { type: 'triangle', vol: 0.06 }); },
+    snipe() { this.tone(1600, 0.18, { type: 'sawtooth', slide: 400, vol: 0.05 }); },
     dive() { this.tone(1000, 0.5, { type: 'sawtooth', slide: 180, vol: 0.05 }); },
     noise(dur, vol, delay = 0) {
         if (!this.ctx || this.muted) return;
@@ -711,6 +777,11 @@ const G = {
     tally: null,
     tallyShown: 0,
     tallyTotal: 3.4,
+    perks: {},
+    perkChoices: [],
+    perkIdx: 1,
+    perkLock: 0,
+    shieldMax: 0,
 };
 G.hiScore = G.scores.length ? G.scores[0].score : 0;
 {
@@ -737,7 +808,7 @@ function multiplier() { return Math.min(8, 1 + Math.floor(G.combo / 4)); }
 function chainUp() {
     const before = multiplier();
     G.combo += 1;
-    G.comboTimer = CHAIN_WINDOW;
+    G.comboTimer = chainWindow();
     G.comboBest = Math.max(G.comboBest, G.combo);
     G.waveStats.bestChain = Math.max(G.waveStats.bestChain, G.combo);
     G.stats.hits += 1;
@@ -759,28 +830,60 @@ function makePlayer() {
     return { x: W / 2 - SPR.player.width / 2, y: H - 70, w: SPR.player.width, h: SPR.player.height, speed: 340, invuln: 2.0 };
 }
 
+// Fleet layouts, rotated through on regular waves. Boss escorts are blocks.
+const FORMATIONS = {
+    block: () => true,
+    gaps: (r, c) => c !== 3 && c !== 7,
+    wedge: (r, c) => Math.abs(c - 5) <= r + 1,
+    checker: (r, c) => (r + c) % 2 === 0 || r === 4,
+};
+const FORMATION_ORDER = ['block', 'gaps', 'wedge', 'checker'];
+function formationFor(wave) {
+    if (isBossWave(wave)) return 'block';
+    const regular = wave - Math.floor(wave / BOSS_EVERY); // skip boss waves in the rotation
+    return FORMATION_ORDER[(regular - 1) % FORMATION_ORDER.length];
+}
+
 function makeFleet() {
     const invaders = [];
     const rows = isBossWave() ? ['crab', 'octopus'] : ROW_TYPES;
+    const shape = FORMATIONS[formationFor(G.wave)];
     const fleetW = (COLS - 1) * COL_SPACING;
     const startX = (W - fleetW) / 2;
     const startY = (isBossWave() ? 180 : 80) + Math.min(G.wave - 1, 4) * 12;
+    const slots = [];
     rows.forEach((type, r) => {
-        const spr = INVADER_TYPES[type].frames[0];
-        for (let c = 0; c < COLS; c++) {
-            invaders.push({
-                type,
-                col: c,
-                row: r,
-                x: startX + c * COL_SPACING - spr.width / 2,
-                y: startY + r * ROW_SPACING,
-                w: spr.width,
-                h: spr.height,
-                alive: true,
-                dive: null,
-            });
-        }
+        for (let c = 0; c < COLS; c++) if (shape(r, c)) slots.push({ type, r, c });
     });
+    // Armoured invaders from wave 3, snipers from wave 4, in the upper rows.
+    if (!isBossWave()) {
+        const upper = slots.filter(sl => sl.r <= 2);
+        const take = (n, type) => {
+            for (let i = 0; i < n && upper.length; i++) {
+                const k = Math.floor(Math.random() * upper.length);
+                upper.splice(k, 1)[0].type = type;
+            }
+        };
+        if (G.wave >= 4) take(Math.min(4, Math.floor((G.wave - 2) / 2)), 'sniper');
+        if (G.wave >= 3) take(Math.min(8, G.wave - 1), 'tank');
+    }
+    for (const sl of slots) {
+        const def = INVADER_TYPES[sl.type];
+        const spr = def.frames[0];
+        invaders.push({
+            type: sl.type,
+            col: sl.c,
+            row: sl.r,
+            x: startX + sl.c * COL_SPACING - spr.width / 2,
+            y: startY + sl.r * ROW_SPACING,
+            w: spr.width,
+            h: spr.height,
+            alive: true,
+            dive: null,
+            hp: def.hp || 1,
+            sniperTimer: sl.type === 'sniper' ? rand(2, 4) : 0,
+        });
+    }
     invaders.forEach(i => { i.hx = i.x; i.hy = i.y; });
     return invaders;
 }
@@ -819,6 +922,7 @@ function startGame() {
     G.powerups = [];
     G.power = { type: null, timer: 0 };
     G.shield = 0;
+    G.perks = {};
     G.lastEntry = null;
     G.stats = { shots: 0, hits: 0 };
     G.displayScore = 0;
@@ -846,7 +950,8 @@ function startWave() {
     G.waveIntro = true;
     G.diveTimer = rand(4, 7);
     G.ufo = null;
-    G.ufoTimer = rand(12, 20);
+    G.ufoTimer = rand(12, 20) * (perk('bounty') ? 0.55 : 1);
+    if (perk('deflector')) G.shield = G.shieldMax = 8;
     if (G.wave > 1) G.bunkers = makeBunkers();
 }
 
@@ -909,7 +1014,7 @@ function popup(x, y, text, color = '#fff', life = 1.0, size = 14) {
 
 function dropPowerup(x, y) {
     G.killsSinceDrop += 1;
-    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop && G.killsSinceDrop < POWERUP_PITY) return;
+    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop * (1 + 0.35 * perk('lucky')) && G.killsSinceDrop < POWERUP_PITY - 3 * perk('lucky')) return;
     G.killsSinceDrop = 0;
     const total = Object.values(POWERUPS).reduce((s, p) => s + p.weight, 0);
     let r = Math.random() * total;
@@ -926,11 +1031,11 @@ function applyPowerup(type) {
     if (type === 'life') {
         G.lives = Math.min(MAX_LIVES, G.lives + 1);
     } else if (type === 'shield') {
-        G.shield = def.duration;
+        G.shield = G.shieldMax = def.duration * powerupScale();
     } else if (type === 'bomb') {
         detonateBomb();
     } else {
-        G.power = { type, timer: def.duration };
+        G.power = { type, timer: def.duration * powerupScale(), max: def.duration * powerupScale() };
     }
 }
 
@@ -965,7 +1070,7 @@ function detonateBomb() {
 
 function fire() {
     const p = G.player;
-    const maxShots = G.power.type === 'rapid' ? 8 : G.power.type === 'spread' ? 6 : 2;
+    const maxShots = (G.power.type === 'rapid' ? 8 : G.power.type === 'spread' ? 6 : 2) + perk('twin') * (G.power.type === 'spread' ? 3 : 1);
     if (G.playerBullets.length >= maxShots) return false;
     const mk = (dx, vx) => ({ x: p.x + p.w / 2 - 2 + dx, y: p.y - 12, w: 4, h: 12, vx, vy: -720, pierce: G.power.type === 'pierce' });
     if (G.power.type === 'spread') {
@@ -981,6 +1086,56 @@ function fire() {
 }
 
 function countShots(n) { G.stats.shots += n; G.waveStats.shots += n; }
+
+function damageInvader(inv) {
+    if (inv.hp > 1) {
+        inv.hp -= 1;
+        chainUp();
+        burst(inv.x + inv.w / 2, inv.y + inv.h / 2, '#dfe9f5', 8, 140);
+        popup(inv.x + inv.w / 2, inv.y, 'CRACK', '#a9bdd2', 0.5, 10);
+        Sound.clank();
+        return;
+    }
+    killInvader(inv);
+}
+
+function isPerkWave(w) { return w % 2 === 0 || isBossWave(w); }
+
+function nextWave() {
+    G.wave += 1;
+    startWave();
+    getReady(1.8);
+}
+
+function offerPerks() {
+    const eligible = PERKS.filter(pk => perk(pk.id) < pk.max && (pk.id !== 'life' || G.lives < MAX_LIVES));
+    for (let i = eligible.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
+    }
+    G.perkChoices = eligible.slice(0, 3);
+    if (!G.perkChoices.length) { nextWave(); return; }
+    G.perkIdx = Math.min(1, G.perkChoices.length - 1);
+    G.perkLock = 0.6; // ignore input held over from the wave
+    G.state = 'perk';
+    Sound.wave();
+}
+
+function choosePerk(i) {
+    if (G.state !== 'perk' || G.perkLock > 0 || !G.perkChoices[i]) return;
+    const pk = G.perkChoices[i];
+    G.perks[pk.id] = perk(pk.id) + 1;
+    if (pk.id === 'life') G.lives = Math.min(MAX_LIVES, G.lives + 1);
+    Sound.powerup();
+    nextWave();
+    banner(pk.name, pk.color, 26);
+}
+
+function movePerk(dir) {
+    if (!G.perkChoices.length) return;
+    G.perkIdx = (G.perkIdx + dir + G.perkChoices.length) % G.perkChoices.length;
+    Sound.blip();
+}
 
 function killInvader(inv) {
     inv.alive = false;
@@ -1019,7 +1174,7 @@ function movePlayer(dt) {
         p.x += Math.abs(d) <= step ? d : Math.sign(d) * step;
     } else {
         const dir = input.left && input.right ? input.lastDir : input.left ? -1 : input.right ? 1 : 0;
-        p.x += dir * p.speed * dt;
+        p.x += dir * p.speed * (1 + 0.15 * perk('thrusters')) * dt;
     }
     p.x = clamp(p.x, 8, W - p.w - 8);
 }
@@ -1069,6 +1224,7 @@ function hintText(kind) {
         case 'again': return m === 'touch' ? 'TAP TO PLAY AGAIN' : m === 'pad' ? 'PRESS START TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN';
         case 'controls': return m === 'touch' ? 'DRAG TO MOVE · TAP TO FIRE' : m === 'pad' ? 'STICK OR D-PAD MOVE · A FIRE · START PAUSE' : '← → MOVE · SPACE FIRE · P PAUSE · M MUTE · F FULLSCREEN';
         case 'difficulty': return m === 'touch' ? 'USE ◀ ▶ BELOW TO CHANGE DIFFICULTY' : m === 'pad' ? 'STICK LEFT / RIGHT TO CHANGE DIFFICULTY' : '← → TO CHANGE DIFFICULTY';
+        case 'perk': return m === 'touch' ? 'TAP AN UPGRADE' : m === 'pad' ? 'D-PAD CHOOSE · A TAKE' : '← → OR 1-3 CHOOSE · ENTER TAKE';
         case 'menu': return m === 'touch' ? 'TAP AN OPTION' : m === 'pad' ? 'D-PAD SELECT · A CONFIRM · START RESUME' : '↑ ↓ SELECT · ENTER CONFIRM · P RESUME';
     }
     return '';
@@ -1166,9 +1322,8 @@ function update(dt) {
         }
         if (G.stateTimer <= 0) {
             G.tally = null;
-            G.wave += 1;
-            startWave();
-            getReady(1.8);
+            if (isPerkWave(G.wave)) offerPerks();
+            else nextWave();
         }
         return;
     }
@@ -1179,6 +1334,7 @@ function update(dt) {
         return;
     }
     if (G.state === 'gameover') { G.stateTimer -= dt; return; }
+    if (G.state === 'perk') { G.perkLock = Math.max(0, G.perkLock - dt); return; }
     if (G.state !== 'playing') return;
 
     const player = G.player;
@@ -1205,7 +1361,7 @@ function update(dt) {
     G.fireCooldown -= dt;
     if ((input.fireBuffer > 0 || input.fire) && G.fireCooldown <= 0 && fire()) {
         input.fireBuffer = 0;
-        G.fireCooldown = G.power.type === 'rapid' ? RAPID_COOLDOWN : FIRE_COOLDOWN;
+        G.fireCooldown = (G.power.type === 'rapid' ? RAPID_COOLDOWN : FIRE_COOLDOWN) * Math.pow(0.8, perk('trigger'));
     }
     input.fireBuffer = Math.max(0, input.fireBuffer - dt);
 
@@ -1215,7 +1371,7 @@ function update(dt) {
         b.x += b.vx * dt;
         if (b.y + b.h < 0 || b.x < -10 || b.x > W + 10) { b.dead = true; missShot(); continue; }
         for (const inv of G.invaders) {
-            if (inv.alive && overlaps(b, inv)) { killInvader(inv); if (!b.pierce) { b.dead = true; break; } }
+            if (inv.alive && overlaps(b, inv)) { damageInvader(inv); if (!b.pierce) { b.dead = true; break; } }
         }
         if (b.dead) continue;
         if (G.boss && overlaps(b, G.boss)) {
@@ -1304,6 +1460,22 @@ function update(dt) {
             if (G.state !== 'playing') return;
         }
 
+        // Snipers glow for half a second, then fire an aimed bolt.
+        for (const inv of alive) {
+            if (inv.type !== 'sniper' || inv.dive) continue;
+            inv.sniperTimer -= dt;
+            if (inv.sniperTimer <= 0) {
+                const cx = inv.x + inv.w / 2, cy = inv.y + inv.h;
+                const dx = player.x + player.w / 2 - cx, dy = player.y - cy;
+                const len = Math.hypot(dx, dy) || 1;
+                const sp = 330 * diff().bulletSpeed;
+                spawnEnemyBullet(cx, cy, dx / len * sp, Math.max(120, dy / len * sp));
+                G.enemyBullets[G.enemyBullets.length - 1].sniper = true;
+                Sound.snipe();
+                inv.sniperTimer = rand(3, 5) * diff().fireRate;
+            }
+        }
+
         // Enemy fire — bottom-most invader of a random column.
         G.enemyFireTimer -= dt;
         const maxEnemyBullets = clamp(3 + Math.floor(G.wave / 2) + diff().extraBullets, 1, 7);
@@ -1368,6 +1540,7 @@ function update(dt) {
     // Power-up capsules
     for (const pu of G.powerups) {
         pu.y += pu.vy * dt;
+        if (perk('magnet')) pu.x += clamp(player.x + player.w / 2 - (pu.x + pu.w / 2), -1, 1) * 200 * dt;
         if (pu.y > H) pu.dead = true;
         else if (overlaps(pu, player)) { pu.dead = true; applyPowerup(pu.type); }
     }
@@ -1389,10 +1562,10 @@ function update(dt) {
                 w: SPR.ufo.width,
                 h: SPR.ufo.height,
                 vx: (fromLeft ? 1 : -1) * 130,
-                points: [50, 100, 150, 300][Math.floor(Math.random() * 4)],
+                points: [50, 100, 150, 300][Math.floor(Math.random() * 4)] * (perk('bounty') ? 2 : 1),
                 soundTimer: 0,
             };
-            G.ufoTimer = rand(15, 25);
+            G.ufoTimer = rand(15, 25) * (perk('bounty') ? 0.55 : 1);
         }
     }
 
@@ -1630,7 +1803,7 @@ function drawHud() {
         ctx.fillStyle = '#222';
         ctx.fillRect(24, 72, 130, 4);
         ctx.fillStyle = col;
-        ctx.fillRect(24, 72, 130 * clamp(G.comboTimer / CHAIN_WINDOW, 0, 1), 4);
+        ctx.fillRect(24, 72, 130 * clamp(G.comboTimer / chainWindow(), 0, 1), 4);
     }
 
     // Milestone banner
@@ -1653,8 +1826,8 @@ function drawHud() {
         ctx.fillRect(W - 24 - 120, barY + 8, 120 * clamp(frac, 0, 1), 5);
         barY += 20;
     };
-    if (G.power.type && G.power.timer > 0) bar(POWERUPS[G.power.type], G.power.timer / POWERUPS[G.power.type].duration);
-    if (G.shield > 0) bar(POWERUPS.shield, G.shield / POWERUPS.shield.duration);
+    if (G.power.type && G.power.timer > 0) bar(POWERUPS[G.power.type], G.power.timer / (G.power.max || POWERUPS[G.power.type].duration));
+    if (G.shield > 0) bar(POWERUPS.shield, G.shield / (G.shieldMax || POWERUPS.shield.duration));
 
     // Boss health
     if (G.boss) {
@@ -1677,6 +1850,7 @@ function drawHud() {
     for (let i = 0; i < Math.max(0, G.lives - 1); i++) {
         ctx.drawImage(SPR.player, 48 + i * 34, H - 24, SPR.player.width * 0.6, SPR.player.height * 0.6);
     }
+    drawPerkBadges();
     if (Sound.muted) text('MUTED', W - 24, H - 14, 12, '#888', 'right');
 }
 
@@ -1727,7 +1901,7 @@ function drawPlayfield() {
     const prog = intro ? 1 - G.stateTimer / G.readyTotal : 1;
     for (const inv of G.invaders) {
         if (!inv.alive) continue;
-        const spr = INVADER_TYPES[inv.type].frames[G.fleetFrame];
+        const spr = (inv.type === 'tank' && inv.hp === 1 ? SPR.tankHurt : INVADER_TYPES[inv.type].frames)[G.fleetFrame];
         if (intro) {
             const t = clamp(prog * 1.9 - inv.row * 0.16, 0, 1);
             const e = easeOutBack(t);
@@ -1742,6 +1916,12 @@ function drawPlayfield() {
                 ctx.globalCompositeOperation = 'source-over';
             }
             drawSprite(spr, inv.x, inv.y, 0.5);
+            if (inv.type === 'sniper' && inv.sniperTimer < 0.5 && G.state === 'playing') {
+                const t = 1 - inv.sniperTimer / 0.5;
+                ctx.globalCompositeOperation = 'lighter';
+                drawLight(inv.x + inv.w / 2, inv.y + 3.5 * SCALE, 20 + t * 40, '#ff3b6b', 0.5 + t * 0.5);
+                ctx.globalCompositeOperation = 'source-over';
+            }
         }
     }
     for (const c of G.corpses) drawSprite(c.spr, c.x, c.y, 0.9);
@@ -1779,12 +1959,17 @@ function drawPlayfield() {
     }
     for (const eb of G.enemyBullets) {
         ctx.drawImage(TRAIL.enemy, Math.round(eb.x), Math.round(eb.y - 18), eb.w, 18);
-        drawLight(eb.x + eb.w / 2, eb.y + eb.h / 2, 28, '#ffd25a', 0.55);
+        drawLight(eb.x + eb.w / 2, eb.y + eb.h / 2, eb.sniper ? 34 : 28, eb.sniper ? '#ff3b6b' : '#ffd25a', 0.55);
     }
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#f4fff4';
     for (const b of G.playerBullets) ctx.fillRect(Math.round(b.x), Math.round(b.y), b.w, b.h);
     for (const eb of G.enemyBullets) {
+        if (eb.sniper) {
+            ctx.fillStyle = '#ff9ab0';
+            ctx.fillRect(Math.round(eb.x), Math.round(eb.y), eb.w, eb.h);
+            continue;
+        }
         const zig = Math.sin(G.time * 30 + eb.wobble) > 0 ? 2 : -2;
         ctx.fillStyle = '#ffd25a';
         ctx.fillRect(Math.round(eb.x + zig), Math.round(eb.y), eb.w, eb.h / 2);
@@ -1967,6 +2152,71 @@ function drawNameEntry() {
     text('SPACE / ENTER TO CONFIRM   BACKSPACE TO GO BACK', W / 2, 432, 11, '#9ad');
 }
 
+const CARD_W = 220, CARD_H = 210, CARD_Y = 190;
+function cardX(i, n) { return W / 2 - (n * CARD_W + (n - 1) * 24) / 2 + i * (CARD_W + 24); }
+function perkCardAt(pt) {
+    const n = G.perkChoices.length;
+    for (let i = 0; i < n; i++) {
+        const x = cardX(i, n);
+        if (pt.x >= x && pt.x <= x + CARD_W && pt.y >= CARD_Y && pt.y <= CARD_Y + CARD_H) return i;
+    }
+    return -1;
+}
+function wrapWords(str, maxChars) {
+    const lines = [];
+    let line = '';
+    for (const w of str.split(' ')) {
+        if ((line + ' ' + w).trim().length > maxChars) { lines.push(line); line = w; } else line = (line + ' ' + w).trim();
+    }
+    if (line) lines.push(line);
+    return lines;
+}
+function drawPerkScreen() {
+    dim(0.75);
+    text('CHOOSE AN UPGRADE', W / 2, 130, 26, '#fff');
+    const n = G.perkChoices.length;
+    G.perkChoices.forEach((pk, i) => {
+        const sel = i === G.perkIdx;
+        const x = cardX(i, n), y = CARD_Y - (sel ? 8 : 0);
+        ctx.fillStyle = sel ? 'rgba(30,30,50,0.95)' : 'rgba(14,14,26,0.9)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, y, CARD_W, CARD_H, 10); else ctx.rect(x, y, CARD_W, CARD_H);
+        ctx.fill();
+        ctx.strokeStyle = sel ? pk.color : rgba(pk.color, 0.35);
+        ctx.lineWidth = sel ? 3 : 2;
+        ctx.stroke();
+        if (sel) {
+            ctx.globalCompositeOperation = 'lighter';
+            drawLight(x + CARD_W / 2, y + 60, 160, pk.color, 0.25 + 0.1 * Math.sin(G.time * 6));
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.strokeStyle = pk.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + CARD_W / 2 - 26, y + 26, 52, 52);
+        text(pk.code, x + CARD_W / 2, y + 53, 18, pk.color);
+        text(pk.name, x + CARD_W / 2, y + 104, 12, '#fff');
+        wrapWords(pk.desc, 18).forEach((ln, k) => text(ln, x + CARD_W / 2, y + 134 + k * 18, 10, '#9ad'));
+        const lvl = perk(pk.id);
+        if (pk.max > 1 && pk.max < 99) text('LEVEL ' + (lvl + 1) + ' / ' + pk.max, x + CARD_W / 2, y + CARD_H - 20, 9, rgba(pk.color, 0.8));
+        if (G.inputMode === 'keys') text(String(i + 1), x + 16, y + 16, 10, '#567');
+    });
+    text(hintText('perk'), W / 2, CARD_Y + CARD_H + 40, 11, '#9ad');
+}
+
+function drawPerkBadges() {
+    const owned = PERKS.filter(pk => perk(pk.id) > 0 && pk.id !== 'life');
+    if (!owned.length) return;
+    const bw = 30, gap = 4;
+    let x = W / 2 - (owned.length * (bw + gap) - gap) / 2;
+    for (const pk of owned) {
+        ctx.strokeStyle = rgba(pk.color, 0.7);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, H - 22.5, bw, 16);
+        text(pk.code + (perk(pk.id) > 1 ? perk(pk.id) : ''), x + bw / 2, H - 14, 8, pk.color);
+        x += bw + gap;
+    }
+}
+
 function drawOverlay() {
     if (G.state === 'paused') {
         dim(0.7);
@@ -2002,6 +2252,8 @@ function drawOverlay() {
             }
         }
         if (isBossWave(G.wave + 1)) text('BOSS INCOMING', W / 2, H / 2 + 125, 16, COLORS.boss);
+    } else if (G.state === 'perk') {
+        drawPerkScreen();
     } else if (G.state === 'entername') {
         drawNameEntry();
     } else if (G.state === 'gameover') {
@@ -2093,6 +2345,7 @@ function primaryAction() {
     else if (G.state === 'gameover') { if (G.stateTimer <= 0) startGame(); }
     else if (G.state === 'paused') menuSelect();
     else if (G.state === 'entername') nameAdvance();
+    else if (G.state === 'perk') choosePerk(G.perkIdx);
 }
 
 function togglePause() {
@@ -2111,12 +2364,14 @@ function toggleFullscreen() {
 
 function pressLeft(down) {
     if (down && G.state === 'start') { cycleDifficulty(-1); return; }
+    if (down && G.state === 'perk') { movePerk(-1); return; }
     if (down && G.state === 'entername') { nameCycle(-1); return; }
     input.left = down;
     if (down) input.lastDir = -1;
 }
 function pressRight(down) {
     if (down && G.state === 'start') { cycleDifficulty(1); return; }
+    if (down && G.state === 'perk') { movePerk(1); return; }
     if (down && G.state === 'entername') { nameCycle(1); return; }
     input.right = down;
     if (down) input.lastDir = 1;
@@ -2133,6 +2388,7 @@ document.addEventListener('keydown', e => {
     if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
     G.inputMode = 'keys';
+    if (G.state === 'perk' && /^Digit[1-3]$/.test(e.code)) { choosePerk(Number(e.code[5]) - 1); return; }
     if (G.state === 'entername') {
         if (/^Key[A-Z]$/.test(e.code)) { nameType(e.code[3]); return; }
         if (/^Digit[0-9]$/.test(e.code)) { nameType(e.code[5]); return; }
@@ -2191,6 +2447,10 @@ canvas.addEventListener('pointerdown', e => {
     } else if (G.state === 'paused') {
         const idx = Math.round((canvasPoint(e).y - MENU_Y0) / MENU_DY);
         if (idx >= 0 && idx < PAUSE_MENU.length) { G.menuIdx = idx; menuSelect(); }
+    } else if (G.state === 'perk') {
+        const pt = canvasPoint(e);
+        const i = perkCardAt(pt);
+        if (i >= 0) { G.perkIdx = i; choosePerk(i); }
     } else if (G.state === 'gameover' && inShareBox(canvasPoint(e))) {
         shareScore();
     } else {
@@ -2303,5 +2563,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS };
 })();

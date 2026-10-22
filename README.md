@@ -6,6 +6,9 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - Pixel-art sprites: three invader types (30/20/10 points) with two-frame animation, a mystery UFO worth 50–300, and a classic green cannon
 - Fleet marches in steps and speeds up as it thins; each wave starts faster and lower
 - Invaders fire back, with destructible bunkers to hide behind
+- **Formations** rotate each wave: block, gapped columns, wedge and checkerboard
+- **Armoured invaders** (from wave 3) crack on the first hit and break on the second; **snipers** (from wave 4) glow for half a second, then fire a fast bolt aimed at you
+- **Upgrades** after every second wave and every boss: pick one of three (Twin Cannon, Hair Trigger, Chain Link, Overcharge, Tractor Beam, Deflector, Thrusters, Lucky Star, Bounty Hunter, Spare Ship). They stack for the rest of the run and show as badges at the bottom of the screen
 - **Boss every fifth wave**: a large saucer with a health bar that sweeps the top of the screen firing three-way volleys
 - **Power-ups** dropped by dying invaders: Rapid fire (R), Spread shot (S), Piercing bolts (P), Shield (H), Bomb (B, wipes out the lowest invader in every column), extra life (L). A drop is guaranteed if you go 14 kills without one
 - **Chains**: every hit within 1.8 seconds of the last extends your chain, raising the score multiplier up to x8 with NICE / GREAT / AWESOME / UNSTOPPABLE call-outs and a rising chime. Misses only cost accuracy
@@ -38,6 +41,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - Clear the fleet to advance; lose a life when hit, and the game ends if the invaders reach you
 - Catch falling capsules for power-ups; shoot the saucer for mystery points
 - Make the top five and you will be asked for your initials
+- On the upgrade screen use ← → or 1-3 and Enter, tap a card, or use the d-pad and A
 - Press **C** (or tap the Share box) on the game-over screen to share your score
 - On a phone, use your browser's **Add to Home Screen** to install the game; it then works offline
 - The game pauses itself when the tab is hidden or loses focus, and honours the system reduced-motion setting (no screen shake)

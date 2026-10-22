@@ -286,6 +286,135 @@ test('the HUD score counts up to the real score', () => {
     assert.equal(g.G.displayScore, g.G.score);
 });
 
+// ---------------------------------------------------------------- variety
+
+test('waves rotate through formations, skipping boss waves', () => {
+    const g = makeGame();
+    const order = [1, 2, 3, 4, 5, 6, 7].map(w => g.api.formationFor(w));
+    assert.deepEqual(order, ['block', 'gaps', 'wedge', 'checker', 'block', 'block', 'gaps']);
+    g.startPlaying();
+    assert.equal(g.G.invaders.length, 55);
+    g.G.wave = 2;
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.G.wave = 1; // wave 1 clear leads straight into wave 2
+    g.run(3.5);
+    assert.equal(g.G.wave, 2);
+    assert.equal(g.G.invaders.length, 45, 'gaps formation leaves two columns empty');
+    assert.ok(!g.G.invaders.some(i => i.col === 3 || i.col === 7));
+});
+
+function playWave(g, wave) {
+    g.startPlaying();
+    g.G.wave = wave;
+    g.G.invaders = []; // force a fresh fleet for this wave
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.G.wave = wave - 1;
+    g.G.state = 'wavecleared';
+    g.G.stateTimer = 0.001;
+    g.G.tally = null;
+    g.api.update(STEP);
+    if (g.G.state === 'perk') { g.run(0.7); g.key('Enter'); }
+    g.run(2.0);
+    g.invulnerable();
+    assert.equal(g.G.wave, wave);
+}
+
+test('armoured invaders appear from wave 3 and take two hits', () => {
+    const g = makeGame();
+    playWave(g, 3);
+    const tanks = g.alive().filter(i => i.type === 'tank');
+    assert.ok(tanks.length >= 2, `expected armoured invaders, found ${tanks.length}`);
+    const t = tanks[0];
+    g.hit(t);
+    assert.equal(t.alive, true, 'first hit cracks the armour');
+    assert.equal(t.hp, 1);
+    g.hit(t);
+    assert.equal(t.alive, false, 'second hit destroys it');
+});
+
+test('snipers appear from wave 4 and fire aimed bolts', () => {
+    const g = makeGame();
+    playWave(g, 4);
+    const snipers = g.alive().filter(i => i.type === 'sniper');
+    assert.ok(snipers.length >= 1, 'expected a sniper');
+    g.G.enemyFireTimer = 99; // silence ordinary fire
+    g.G.enemyBullets = [];
+    g.G.player.x = 40; // far to the left of the fleet
+    snipers.forEach(sn => { sn.sniperTimer = 0.001; });
+    g.api.update(STEP);
+    const shots = g.G.enemyBullets.filter(b => b.sniper);
+    assert.ok(shots.length >= 1, 'sniper should fire');
+    assert.ok(shots.every(b => b.vx < 0), 'aimed bolts head toward the player');
+});
+
+// ---------------------------------------------------------------- upgrades
+
+test('an upgrade pick follows every second wave, not the first', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.run(3.5);
+    assert.notEqual(g.G.state, 'perk', 'no pick after wave 1');
+    g.run(2.0);
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.run(3.5);
+    assert.equal(g.G.state, 'perk');
+    assert.equal(g.G.perkChoices.length, 3);
+    assert.equal(new Set(g.G.perkChoices.map(p => p.id)).size, 3, 'three different upgrades');
+});
+
+test('input held over from the wave cannot pick an upgrade by accident', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.wave = 2;
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.run(3.5);
+    assert.equal(g.G.state, 'perk');
+    g.key('Enter');
+    assert.equal(g.G.state, 'perk', 'pick is locked for a moment');
+    g.run(0.7);
+    g.key('ArrowRight');
+    const chosen = g.G.perkChoices[g.G.perkIdx];
+    g.key('Enter');
+    assert.equal(g.G.state, 'ready');
+    assert.equal(g.G.perks[chosen.id], 1);
+});
+
+test('twin cannon and hair trigger raise the fire rate', () => {
+    const base = makeGame();
+    base.startPlaying();
+    base.input.fire = true;
+    base.run(2.0);
+    const baseShots = base.G.stats.shots;
+
+    const up = makeGame();
+    up.startPlaying();
+    up.G.perks = { twin: 2, trigger: 3 };
+    up.input.fire = true;
+    up.run(2.0);
+    assert.ok(up.G.stats.shots >= baseShots * 1.6, `upgraded ${up.G.stats.shots} vs base ${baseShots}`);
+});
+
+test('chain link lengthens the chain window and overcharge lengthens power-ups', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.perks = { chain: 2, overcharge: 1 };
+    g.hit(g.alive()[0]);
+    assert.equal(g.G.comboTimer, 2.8);
+    g.api.applyPowerup('rapid');
+    assert.ok(Math.abs(g.G.power.timer - 9 * 1.4) < 1e-9);
+});
+
+test('deflector starts each wave with a shield', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.perks = { deflector: 1 };
+    g.G.shield = 0;
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.run(3.5);
+    assert.ok(g.G.shield > 0);
+});
+
 // ---------------------------------------------------------------- core systems
 
 test('boss arrives on wave 5; killing it lets the wave advance', () => {
@@ -294,6 +423,7 @@ test('boss arrives on wave 5; killing it lets the wave advance', () => {
     for (let w = 1; w < 5; w++) {
         g.G.invaders.forEach(i => { i.alive = false; });
         g.run(3.5);
+        if (g.G.state === 'perk') { g.run(0.7); g.key('Enter'); }
         g.run(2.0);
         g.invulnerable();
     }
@@ -302,6 +432,9 @@ test('boss arrives on wave 5; killing it lets the wave advance', () => {
     g.api.killBoss();
     g.G.invaders.forEach(i => { i.alive = false; });
     g.run(3.5);
+    assert.equal(g.G.state, 'perk', 'a boss wave is followed by an upgrade pick');
+    g.run(0.7);
+    g.key('Enter');
     assert.equal(g.G.wave, 6);
 });
 
