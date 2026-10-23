@@ -428,12 +428,14 @@ const POWERUPS = {
 const POWERUP_DROP_CHANCE = 0.11;
 const POWERUP_PITY = 14; // a drop is guaranteed after this many kills without one
 const CHAIN_WINDOW = 1.8; // seconds between kills to keep a chain alive
+const DIVE_WINDUP = 0.55;  // seconds a diver shakes before leaving the fleet
+const DIVE_SPEED_MAX = 250; // px/s, before difficulty scaling
 
 // Upgrades offered after every second wave and every boss. They stack for
 // the rest of the run.
 const PERKS = [
     { id: 'twin', code: 'TW', name: 'TWIN CANNON', desc: 'ONE MORE BOLT IN FLIGHT', color: '#8dffa0', max: 2 },
-    { id: 'trigger', code: 'HT', name: 'HAIR TRIGGER', desc: 'FIRE 20% FASTER', color: '#5ad7ff', max: 3 },
+    { id: 'trigger', code: 'HT', name: 'HAIR TRIGGER', desc: 'FIRE 20% FASTER, BOLTS 15% FASTER', color: '#5ad7ff', max: 3 },
     { id: 'chain', code: 'CL', name: 'CHAIN LINK', desc: 'CHAINS LAST HALF A SECOND LONGER', color: '#ffd25a', max: 3 },
     { id: 'overcharge', code: 'OC', name: 'OVERCHARGE', desc: 'POWER-UPS LAST 40% LONGER', color: '#ff6ad5', max: 2 },
     { id: 'magnet', code: 'TB', name: 'TRACTOR BEAM', desc: 'POWER-UPS DRIFT TOWARD YOU', color: '#7affff', max: 1 },
@@ -508,6 +510,7 @@ const Sound = {
     clank() { this.tone(1800, 0.06, { type: 'square', vol: 0.05 }); this.tone(900, 0.1, { type: 'triangle', vol: 0.06 }); },
     snipe() { this.tone(1600, 0.18, { type: 'sawtooth', slide: 400, vol: 0.05 }); },
     dive() { this.tone(1000, 0.5, { type: 'sawtooth', slide: 180, vol: 0.05 }); },
+    windup() { this.tone(300, 0.45, { type: 'square', slide: 900, vol: 0.035 }); },
     noise(dur, vol, delay = 0) {
         if (!this.ctx || this.muted) return;
         const t = this.ctx.currentTime + delay;
@@ -1040,8 +1043,8 @@ function applyPowerup(type) {
 }
 
 // Shots allowed on screen and the minimum gap between them.
-const FIRE_COOLDOWN = 0.2;
-const RAPID_COOLDOWN = 0.085;
+const FIRE_COOLDOWN = 0.12;
+const RAPID_COOLDOWN = 0.055;
 const FIRE_BUFFER = 0.15; // a press this close to the next allowed shot still counts
 
 // Bomb: destroys the lowest invader in every column, clears enemy fire,
@@ -1070,9 +1073,9 @@ function detonateBomb() {
 
 function fire() {
     const p = G.player;
-    const maxShots = (G.power.type === 'rapid' ? 8 : G.power.type === 'spread' ? 6 : 2) + perk('twin') * (G.power.type === 'spread' ? 3 : 1);
+    const maxShots = (G.power.type === 'rapid' ? 10 : G.power.type === 'spread' ? 9 : 3) + perk('twin') * (G.power.type === 'spread' ? 3 : 1);
     if (G.playerBullets.length >= maxShots) return false;
-    const mk = (dx, vx) => ({ x: p.x + p.w / 2 - 2 + dx, y: p.y - 12, w: 4, h: 12, vx, vy: -720, pierce: G.power.type === 'pierce' });
+    const mk = (dx, vx) => ({ x: p.x + p.w / 2 - 2 + dx, y: p.y - 12, w: 4, h: 14, vx, vy: -860 * (1 + 0.15 * perk('trigger')), pierce: G.power.type === 'pierce' });
     if (G.power.type === 'spread') {
         G.playerBullets.push(mk(0, 0), mk(-6, -170), mk(6, 170));
         countShots(3);
@@ -1452,9 +1455,9 @@ function update(dt) {
             if (G.diveTimer <= 0 && diving.length < maxDivers && alive.length > 3) {
                 const candidates = alive.filter(i => !i.dive);
                 const inv = candidates[Math.floor(Math.random() * candidates.length)];
-                inv.dive = { phase: 'down', t: 0, wobble: rand(0, Math.PI * 2) };
-                G.diveTimer = Math.max(3, rand(6, 10) - G.wave * 0.3) * diff().fireRate;
-                Sound.dive();
+                inv.dive = { phase: 'wind', t: 0, wobble: rand(0, Math.PI * 2), aimX: player.x + player.w / 2 };
+                G.diveTimer = Math.max(3.5, rand(7, 11) - G.wave * 0.3) * diff().fireRate;
+                Sound.windup();
             }
             for (const inv of diving) updateDiver(inv, dt);
             if (G.state !== 'playing') return;
@@ -1627,10 +1630,21 @@ function updateDiver(inv, dt) {
     const d = inv.dive;
     const p = G.player;
     d.t += dt;
+    // Wind-up: shake in place for a moment so the dive is telegraphed.
+    if (d.phase === 'wind') {
+        inv.x = inv.hx + Math.sin(d.t * 40) * 3;
+        inv.y = inv.hy;
+        if (d.t >= DIVE_WINDUP) { d.phase = 'down'; d.t = 0; Sound.dive(); }
+        return;
+    }
     if (d.phase === 'down') {
-        const targetX = p.x + p.w / 2 - inv.w / 2;
-        inv.x += (targetX - inv.x) * 1.8 * dt + Math.sin(d.t * 9 + d.wobble) * 90 * dt;
-        inv.y += (230 + G.wave * 8) * diff().bulletSpeed * dt;
+        // Aim at where the player was when the dive began, with mild
+        // tracking, so a dodge actually works. Speed ramps up over the dive.
+        const targetX = d.aimX - inv.w / 2;
+        inv.x += (targetX - inv.x) * 1.1 * dt + Math.sin(d.t * 7 + d.wobble) * 70 * dt;
+        const ramp = Math.min(1, 0.45 + d.t * 0.5);
+        inv.y += Math.min(DIVE_SPEED_MAX, 140 + G.wave * 6) * ramp * diff().bulletSpeed * dt;
+        if (d.t > 0.35 && Math.abs((p.x + p.w / 2) - d.aimX) < 120) d.aimX += ((p.x + p.w / 2) - d.aimX) * 0.6 * dt;
         for (const bk of G.bunkers) bk.crush(inv);
         if (overlaps(inv, p)) {
             const absorbed = hitPlayer();
@@ -1912,7 +1926,9 @@ function drawPlayfield() {
         } else {
             if (inv.dive) {
                 ctx.globalCompositeOperation = 'lighter';
-                drawLight(inv.x + inv.w / 2, inv.y + inv.h / 2, 60, INVADER_TYPES[inv.type].color, 0.35);
+                const winding = inv.dive.phase === 'wind';
+                const pulse = winding ? 0.4 + 0.5 * Math.abs(Math.sin(inv.dive.t * 25)) : 0.35;
+                drawLight(inv.x + inv.w / 2, inv.y + inv.h / 2, winding ? 80 : 60, winding ? '#ffffff' : INVADER_TYPES[inv.type].color, pulse);
                 ctx.globalCompositeOperation = 'source-over';
             }
             drawSprite(spr, inv.x, inv.y, 0.5);

@@ -107,7 +107,7 @@ test('difficulty is chosen with left/right on the title and remembered', () => {
 
 // ---------------------------------------------------------------- controls
 
-test('holding fire autofires at the base rate with two bolts on screen at most', () => {
+test('holding fire autofires at the base rate with three bolts on screen at most', () => {
     const g = makeGame();
     g.startPlaying();
     const before = g.G.stats.shots;
@@ -115,8 +115,8 @@ test('holding fire autofires at the base rate with two bolts on screen at most',
     g.input.fire = true;
     g.run(1.5, () => { maxOnScreen = Math.max(maxOnScreen, g.G.playerBullets.length); });
     g.input.fire = false;
-    assert.ok(g.G.stats.shots - before >= 5, `expected sustained autofire, got ${g.G.stats.shots - before} shots`);
-    assert.ok(maxOnScreen <= 2, `at most two bolts on screen, saw ${maxOnScreen}`);
+    assert.ok(g.G.stats.shots - before >= 10, `expected sustained autofire, got ${g.G.stats.shots - before} shots`);
+    assert.ok(maxOnScreen <= 3, `at most three bolts on screen, saw ${maxOnScreen}`);
 });
 
 test('a fire press during the cooldown is buffered and still fires', () => {
@@ -140,7 +140,7 @@ test('rapid fire shortens the cooldown', () => {
     g.input.fire = true;
     g.run(1.0);
     g.input.fire = false;
-    assert.ok(g.G.stats.shots - before >= 9, `rapid fire should exceed 9 shots per second, got ${g.G.stats.shots - before}`);
+    assert.ok(g.G.stats.shots - before >= 14, `rapid fire should exceed 14 shots per second, got ${g.G.stats.shots - before}`);
 });
 
 test('when both directions are held, the most recent one wins', () => {
@@ -198,7 +198,7 @@ test('misses do not break a chain, but letting the timer run out does', () => {
     const g = makeGame();
     g.startPlaying();
     for (let i = 0; i < 5; i++) g.hit(g.alive()[i]);
-    g.G.playerBullets = [{ x: 400, y: -20, w: 4, h: 12, vx: 0, vy: -720 }]; // already off-screen: a miss
+    g.G.playerBullets = [{ x: 400, y: -20, w: 4, h: 14, vx: 0, vy: -860 }]; // already off-screen: a miss
     g.api.update(STEP);
     assert.equal(g.G.combo, 5, 'a miss should not reset the chain');
     g.run(2.0);
@@ -345,6 +345,23 @@ test('snipers appear from wave 4 and fire aimed bolts', () => {
     const shots = g.G.enemyBullets.filter(b => b.sniper);
     assert.ok(shots.length >= 1, 'sniper should fire');
     assert.ok(shots.every(b => b.vx < 0), 'aimed bolts head toward the player');
+});
+
+test('divers wind up visibly before leaving the fleet and descend slower than before', () => {
+    const g = makeGame();
+    playWave(g, 3);
+    g.G.enemyFireTimer = 99;
+    const inv = g.alive().find(i => i.row === 2 && !i.dive);
+    inv.dive = { phase: 'wind', t: 0, wobble: 0, aimX: 400 };
+    g.run(0.3);
+    assert.equal(inv.dive.phase, 'wind', 'still winding up after 0.3s');
+    assert.equal(inv.y, inv.hy, 'stays in the fleet row while winding up');
+    g.run(0.3);
+    assert.equal(inv.dive.phase, 'down');
+    const y0 = inv.y;
+    g.run(1.0);
+    const fallPerSecond = inv.y - y0;
+    assert.ok(fallPerSecond < 190, `fell ${Math.round(fallPerSecond)} px in 1s; should be gentle early in the dive`);
 });
 
 // ---------------------------------------------------------------- upgrades
