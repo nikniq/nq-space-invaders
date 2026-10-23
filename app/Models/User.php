@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -10,8 +9,14 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
+/**
+ * A player account. Accounts are created only after the email address is
+ * confirmed, through an emailed link or a verified Google account, so every
+ * user has `email_verified_at` set. A password is optional and can be added
+ * later; `google_id` and `email_verified_at` are set with `forceFill()`.
+ */
+#[Fillable(['name', 'email', 'password', 'avatar'])]
+#[Hidden(['password', 'remember_token', 'google_id'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -28,5 +33,13 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Whether the account can sign in with a password yet.
+     */
+    public function hasPassword(): bool
+    {
+        return $this->password !== null;
     }
 }

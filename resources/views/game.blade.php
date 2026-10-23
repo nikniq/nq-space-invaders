@@ -54,6 +54,28 @@
             image-rendering: crisp-edges;
             cursor: pointer;
         }
+        #account {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            justify-content: flex-end;
+            width: 100%;
+            font: 10px/1.4 "Press Start 2P", "Courier New", monospace;
+            color: #9ad;
+        }
+        #account a, #account button {
+            color: #ffd25a;
+            background: none;
+            border: 0;
+            padding: 0;
+            font: inherit;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        #account a:hover, #account button:hover { color: #fff; }
+        #account .who { color: #3cff5a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+        #account form { display: inline; }
+        #account .status { color: #3cff5a; margin-right: auto; }
         #touchControls {
             display: none;
             grid-template-columns: 1fr 1fr 1fr;
@@ -112,6 +134,22 @@
 </head>
 <body>
     <div id="gameWrap">
+        <nav id="account" aria-label="Account">
+            @if (session('status'))
+                <span class="status" role="status">{{ session('status') }}</span>
+            @endif
+            @auth
+                <span class="who" title="{{ auth()->user()->email }}">{{ auth()->user()->name }}</span>
+                <a href="{{ route('password.edit') }}">{{ auth()->user()->hasPassword() ? 'PASSWORD' : 'SET PASSWORD' }}</a>
+                <form method="POST" action="{{ route('logout') }}">
+                    @csrf
+                    <button type="submit">SIGN OUT</button>
+                </form>
+            @else
+                <a href="{{ route('login') }}">SIGN IN</a>
+                <a href="{{ route('register') }}">CREATE ACCOUNT</a>
+            @endauth
+        </nav>
         <canvas id="gameCanvas" width="800" height="600" aria-label="Space Invaders game"></canvas>
     </div>
     <script src="{{ asset('space-invaders.js') }}?v={{ filemtime(public_path('space-invaders.js')) }}"></script>

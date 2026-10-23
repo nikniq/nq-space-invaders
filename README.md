@@ -19,7 +19,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - WebAudio sound effects (shoot, hits, the four-note march, UFO warble, boss, power-ups) with a mute toggle
 - Start, pause, and game-over screens with instant restart; auto-pauses when the tab loses focus
 - **Top-5 leaderboard** with three-letter initials, saved in the browser
-- **Divers**: from wave 3, invaders peel off and swoop at you Galaga-style before rejoining the fleet
+- **Divers**: from wave 3, invaders shake and flash white for half a second, then swoop at you Galaga-style before rejoining the fleet. They aim at where you were when they left, so a sidestep works
 - **Procedural chiptune soundtrack** that speeds up as the fleet thins (toggle in the pause menu)
 - Accuracy and best chain shown at game over
 - **Share your score** from the game-over screen (system share sheet or clipboard)
@@ -33,7 +33,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 ## How to Play
 - Pick **Easy / Normal / Hard** on the title screen with ← → (Easy gives four lives, slower and sparser enemy fire). Your choice and the mute setting are remembered.
 - **Left/Right** arrows (or **A/D**) move; if you hold both, the last one pressed wins
-- **Space** fires. Hold it to autofire; up to two bolts can be in flight, and a press made just before the next shot is ready is remembered rather than dropped
+- **Space** fires. Hold it to autofire at about eight shots a second; up to three bolts can be in flight, and a press made just before the next shot is ready is remembered rather than dropped
 - **Enter** starts or restarts, **P** or **Esc** opens the pause menu (Resume / Restart / Sound / Quit), **M** mutes, **F** toggles fullscreen
 - Gamepad: left stick or d-pad moves, A fires, Start pauses, d-pad navigates menus
 - Touch: **hold and drag anywhere on the game** to move and autofire, or use the on-screen buttons; tap to start. A mouse held on the game also autofires
@@ -46,9 +46,18 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - On a phone, use your browser's **Add to Home Screen** to install the game; it then works offline
 - The game pauses itself when the tab is hidden or loses focus, and honours the system reduced-motion setting (no screen shake)
 
+## Accounts
+Playing never requires an account. Signing in is optional and lays the groundwork for saved progress and an online leaderboard.
+
+- **Email link (default).** Enter an email on `/register` or `/login` and a signed, single-use link is emailed. The account is created only when the link is confirmed, so every account has a verified address. New accounts have **no password**; after confirming you are offered the chance to set one, or you can keep using email links.
+- **Google.** Shown when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set in `.env`. Create an OAuth client in the Google Cloud console with the authorised redirect URI `{APP_URL}/auth/google/callback`. A Google account is linked to an existing email account only when Google reports the address as verified.
+- **Password.** Optional, set or changed at `/account/password`. Password sign-in is available once one is set.
+- Links expire after 60 minutes and work once. Link requests are limited to 3 per address per minute and 30 per IP per hour; password attempts to 5 per minute.
+- The app needs a database for accounts. The default is SQLite: `touch database/database.sqlite && php artisan migrate`. Mail defaults to the `log` driver locally, so the link appears in `storage/logs/laravel.log`; set `MAIL_*` for real delivery.
+
 ## Tests
 ```bash
-php artisan test     # PHPUnit: the game page and its web-root assets
+php artisan test     # PHPUnit: accounts (email links, Google, passwords, sessions), the game page and its assets
 npm run test:js      # Node's built-in runner: headless gameplay tests for public_html/space-invaders.js
 ```
 
@@ -67,6 +76,7 @@ Sessions, cache and queue use the `file`/`sync` drivers by default, so no databa
 composer install
 cp .env.example .env
 php artisan key:generate
+touch database/database.sqlite && php artisan migrate
 php artisan serve
 ```
 Then open http://127.0.0.1:8000.

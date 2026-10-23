@@ -34,6 +34,26 @@ class UserFactory extends Factory
     }
 
     /**
+     * Indicate that the account has not set a password yet.
+     */
+    public function withoutPassword(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'password' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the account is linked to a Google account.
+     */
+    public function google(string $googleId = '1234567890'): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'google_id' => $googleId,
+        ]);
+    }
+
+    /**
      * Indicate that the model's email address should be unverified.
      */
     public function unverified(): static

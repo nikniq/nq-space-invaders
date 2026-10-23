@@ -5,10 +5,9 @@
 #   ./deploy.sh
 #
 # Steps: git pull -> composer install (only when composer.lock moved)
-#        -> rebuild config/route/view caches -> verify the game page.
+#        -> migrate -> rebuild config/route/view caches -> verify the game page.
 #
-# There is no database, no migrations and no seeders in this project, so
-# the sequence is deliberately short. The web root is public_html/, which
+# Accounts live in the database, so migrations run on every deploy. The web root is public_html/, which
 # bootstrap/app.php registers via usePublicPath.
 
 set -euo pipefail
@@ -38,6 +37,9 @@ fi
 echo "→ storage permissions"
 mkdir -p storage/framework/{cache/data,sessions,views} storage/logs bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
+
+echo "→ migrate"
+php artisan migrate --force
 
 echo "→ cache config/routes/views"
 php artisan optimize
