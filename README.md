@@ -47,7 +47,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - The game pauses itself when the tab is hidden or loses focus, and honours the system reduced-motion setting (no screen shake)
 
 ## Accounts
-Playing never requires an account. Signing in is optional and lays the groundwork for saved progress and an online leaderboard.
+Playing never requires an account. Signed-in players' finished games are saved to a **world leaderboard**, shown on the title and game-over screens alternately with your own browser's top five, along with your world rank after each game. Guests see a prompt to sign in.
 
 - **Email link (default).** Enter an email on `/register` or `/login` and a signed, single-use link is emailed. The account is created only when the link is confirmed, so every account has a verified address. New accounts have **no password**; after confirming you are offered the chance to set one, or you can keep using email links.
 - **Google.** Shown when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set in `.env`. Create an OAuth client in the Google Cloud console with the authorised redirect URI `{APP_URL}/auth/google/callback`. A Google account is linked to an existing email account only when Google reports the address as verified.

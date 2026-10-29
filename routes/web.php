@@ -5,11 +5,14 @@ use App\Http\Controllers\Auth\EmailLinkController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Auth\RegistrationController;
 use App\Http\Controllers\Auth\SessionController;
+use App\Http\Controllers\ScoreController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('game');
 })->name('game');
+
+Route::get('/scores', [ScoreController::class, 'index'])->name('scores.index');
 
 Route::middleware('guest')->group(function () {
     Route::get('/login', [SessionController::class, 'create'])->name('login');
@@ -29,6 +32,8 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::get('/account/password', [PasswordController::class, 'edit'])->name('password.edit');
     Route::put('/account/password', [PasswordController::class, 'update'])->name('password.update');
+
+    Route::post('/scores', [ScoreController::class, 'store'])->middleware('throttle:scores')->name('scores.store');
 
     Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
 });

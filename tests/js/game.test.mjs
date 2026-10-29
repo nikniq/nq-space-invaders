@@ -13,7 +13,7 @@ import vm from 'node:vm';
 const SOURCE = readFileSync(fileURLToPath(new URL('../../public_html/space-invaders.js', import.meta.url)), 'utf8');
 const STEP = 1 / 120;
 
-function makeGame({ seed = 1, storage = {} } = {}) {
+function makeGame({ seed = 1, storage = {}, config = null, fetch = undefined } = {}) {
     const noop = () => {};
     const gradient = { addColorStop: noop };
     const calls = {};
@@ -37,7 +37,8 @@ function makeGame({ seed = 1, storage = {} } = {}) {
     let rafCallback = null;
     const context = {
         console,
-        window: { addEventListener: noop, devicePixelRatio: 1, matchMedia: () => ({ matches: false }) },
+        window: { addEventListener: noop, devicePixelRatio: 1, matchMedia: () => ({ matches: false }), GAME_CONFIG: config },
+        fetch,
         navigator: { getGamepads: () => [] },
         document: {
             getElementById: () => mainCanvas,
@@ -430,6 +431,66 @@ test('deflector starts each wave with a shield', () => {
     g.G.invaders.forEach(i => { i.alive = false; });
     g.run(3.5);
     assert.ok(g.G.shield > 0);
+});
+
+// ---------------------------------------------------------------- online
+
+const flush = () => new Promise(r => setImmediate(r));
+
+function fakeServer(board = []) {
+    const calls = [];
+    const fetch = (url, opts = {}) => {
+        calls.push({ url, opts });
+        if (opts.method === 'POST') {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ rank: 3, best: 500 }) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: board }) });
+    };
+    return { calls, fetch };
+}
+
+function loseLastLife(g) {
+    g.G.lives = 1;
+    g.G.player.invuln = 0;
+    g.G.shield = 0;
+    g.G.enemyBullets.push({ x: g.G.player.x + 10, y: g.G.player.y + 4, w: 4, h: 14, vx: 0, vy: 0, wobble: 0 });
+    g.run(2.5);
+}
+
+test('the world board is loaded on start and shown alternately with local scores', async () => {
+    const server = fakeServer([{ name: 'Ace', score: 9000, wave: 7, difficulty: 'normal' }]);
+    const g = makeGame({ config: { scoresUrl: '/scores', submitUrl: null, csrf: 't' }, fetch: server.fetch });
+    await flush();
+    assert.equal(server.calls[0].url, '/scores');
+    assert.equal(g.api.Online.board[0].name, 'Ace');
+});
+
+test('a signed-in player\'s finished game is posted with the CSRF token and the rank is shown', async () => {
+    const server = fakeServer();
+    const g = makeGame({ config: { scoresUrl: '/scores', submitUrl: '/scores', csrf: 'tok' }, fetch: server.fetch });
+    g.startPlaying();
+    g.hit(g.alive()[0]);
+    loseLastLife(g);
+    await flush();
+    const post = server.calls.find(c => c.opts.method === 'POST');
+    assert.ok(post, 'score should be submitted');
+    assert.equal(post.opts.headers['X-CSRF-TOKEN'], 'tok');
+    const body = JSON.parse(post.opts.body);
+    assert.equal(body.score, g.G.score);
+    assert.equal(body.wave, 1);
+    assert.equal(body.difficulty, 'normal');
+    assert.equal(g.api.Online.status, 'SAVED · WORLD RANK #3');
+});
+
+test('guests are invited to sign in instead of having their score posted', async () => {
+    const server = fakeServer();
+    const g = makeGame({ config: { scoresUrl: '/scores', submitUrl: null, csrf: 't' }, fetch: server.fetch });
+    g.startPlaying();
+    g.hit(g.alive()[0]);
+    loseLastLife(g);
+    await flush();
+    assert.equal(server.calls.filter(c => c.opts.method === 'POST').length, 0);
+    assert.equal(g.api.Online.status, 'SIGN IN TO SAVE SCORES ONLINE');
 });
 
 // ---------------------------------------------------------------- core systems

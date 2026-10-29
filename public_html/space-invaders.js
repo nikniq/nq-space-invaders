@@ -1697,7 +1697,42 @@ function shareScore() {
     } catch (e) { /* ignore */ }
 }
 
+// ---------------------------------------------------------------------------
+// Online: world leaderboard and score submission (signed-in players only).
+// window.GAME_CONFIG is written by the page; without it the game is offline.
+// ---------------------------------------------------------------------------
+const CFG = (typeof window !== 'undefined' && window.GAME_CONFIG) || null;
+const Online = {
+    board: [],
+    status: '',
+    canFetch() { return !!CFG && typeof fetch === 'function'; },
+    loadBoard() {
+        if (!this.canFetch()) return Promise.resolve();
+        return fetch(CFG.scoresUrl, { headers: { Accept: 'application/json' } })
+            .then(r => (r.ok ? r.json() : null))
+            .then(json => { if (json && Array.isArray(json.data)) this.board = json.data; })
+            .catch(() => {});
+    },
+    submit(score, wave) {
+        if (!CFG || score <= 0) { this.status = ''; return Promise.resolve(); }
+        if (!CFG.submitUrl) { this.status = 'SIGN IN TO SAVE SCORES ONLINE'; return Promise.resolve(); }
+        if (!this.canFetch()) return Promise.resolve();
+        this.status = 'SAVING SCORE…';
+        return fetch(CFG.submitUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': CFG.csrf },
+            credentials: 'same-origin',
+            body: JSON.stringify({ score, wave, difficulty: G.difficulty }),
+        })
+            .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+            .then(json => { this.status = 'SAVED · WORLD RANK #' + json.rank; return this.loadBoard(); })
+            .catch(() => { this.status = 'COULD NOT SAVE SCORE'; });
+    },
+};
+Online.loadBoard();
+
 function endGame() {
+    Online.submit(G.score, G.wave);
     if (qualifies(G.score)) {
         G.name = G.lastEntry ? [...G.lastEntry] : ['A', 'A', 'A'];
         G.nameIdx = 0;
@@ -2064,15 +2099,19 @@ function dim(alpha = 0.7) {
     ctx.fillRect(0, 0, W, H);
 }
 
+// Alternates between this browser's scores and the world board when the
+// world board has entries.
 function drawScoreboard(y, highlight) {
-    text('TOP SCORES', W / 2, y, 14, '#9ad');
-    if (!G.scores.length) { text('NO SCORES YET', W / 2, y + 30, 12, '#666'); return; }
-    G.scores.forEach((e, i) => {
+    const world = Online.board.length > 0 && Math.floor(G.time / 5) % 2 === 1;
+    const list = world ? Online.board.slice(0, BOARD_SIZE) : G.scores;
+    text(world ? 'WORLD TOP ' + BOARD_SIZE : 'YOUR TOP SCORES', W / 2, y, 14, world ? '#ffd25a' : '#9ad');
+    if (!list.length) { text('NO SCORES YET', W / 2, y + 30, 12, '#666'); return; }
+    list.forEach((e, i) => {
         const rowY = y + 28 + i * 22;
         const hl = highlight && e === highlight;
         const color = hl ? '#ffd25a' : '#fff';
         text(String(i + 1) + '.', W / 2 - 150, rowY, 12, color, 'left');
-        text(e.name, W / 2 - 110, rowY, 12, color, 'left');
+        text(String(e.name).slice(0, 10).toUpperCase(), W / 2 - 110, rowY, 12, color, 'left');
         text(pad(e.score), W / 2 + 60, rowY, 12, color, 'right');
         text(e.wave ? 'W' + e.wave : '', W / 2 + 150, rowY, 12, '#9ad', 'right');
     });
@@ -2279,6 +2318,7 @@ function drawOverlay() {
         const acc = G.stats.shots ? Math.round(100 * G.stats.hits / G.stats.shots) : 0;
         text('ACCURACY ' + acc + '%   SHOTS ' + G.stats.shots + (G.comboBest >= 5 ? '   BEST COMBO ' + G.comboBest : ''), W / 2, 172, 11, '#9ad');
         const mine = G.scores.find(e => e.score === G.score && G.lastEntry && e.name === G.lastEntry.join(''));
+        if (Online.status) text(Online.status, W / 2, 198, 11, /SAVED/.test(Online.status) ? COLORS.player : '#9ad');
         drawScoreboard(230, mine);
         const blink = Math.sin(G.time * 5) > -0.2;
         if (G.stateTimer <= 0 && blink) text(hintText('again'), W / 2, 420, 16, '#9ad');
@@ -2579,5 +2619,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS, Online };
 })();

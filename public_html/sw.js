@@ -1,7 +1,7 @@
 // Service worker: makes the game installable and playable offline.
 // Same-origin GET requests are served stale-while-revalidate, so a visit
 // always works from cache and quietly picks up the next version.
-const CACHE = 'nq-space-invaders-v1';
+const CACHE = 'nq-space-invaders-v2';
 const PRECACHE = ['./', './space-invaders.js', './icon.svg', './manifest.webmanifest'];
 
 self.addEventListener('install', event => {
@@ -20,7 +20,20 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
     const req = event.request;
-    if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+    const url = new URL(req.url);
+    if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+    // Pages carry the signed-in player and a CSRF token, so always try the
+    // network first and fall back to the cached game page only when offline.
+    if (req.mode === 'navigate') {
+        if (url.pathname !== '/') return;
+        event.respondWith(fetch(req).then(res => {
+            if (res.ok) caches.open(CACHE).then(c => c.put('./', res.clone()));
+            return res;
+        }).catch(() => caches.match('./')));
+        return;
+    }
+    // Live data and account pages are never cached.
+    if (url.pathname.startsWith('/scores') || url.pathname.startsWith('/email-link') || url.pathname.startsWith('/auth')) return;
     event.respondWith(
         caches.open(CACHE).then(async cache => {
             const cached = await cache.match(req);

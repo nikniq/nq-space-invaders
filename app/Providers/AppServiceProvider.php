@@ -29,6 +29,11 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by(Str::transliterate(Str::lower($request->string('email')).'|'.$request->ip()));
         });
 
+        // A game lasts minutes, so a handful of submissions a minute is ample.
+        RateLimiter::for('scores', function (Request $request) {
+            return Limit::perMinute(6)->by('user:'.$request->user()?->id);
+        });
+
         // Each link is an email we send. Limit per address so nobody can flood
         // one inbox, and per IP so one client cannot mail many addresses.
         RateLimiter::for('email-link', function (Request $request) {

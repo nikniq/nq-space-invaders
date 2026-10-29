@@ -152,6 +152,15 @@
         </nav>
         <canvas id="gameCanvas" width="800" height="600" aria-label="Space Invaders game"></canvas>
     </div>
+    <script>
+        window.GAME_CONFIG = {{ Js::from([
+            'player' => auth()->user()?->only('name'),
+            'csrf' => csrf_token(),
+            'scoresUrl' => route('scores.index'),
+            'submitUrl' => auth()->check() ? route('scores.store') : null,
+            'loginUrl' => route('login'),
+        ]) }};
+    </script>
     <script src="{{ asset('space-invaders.js') }}?v={{ filemtime(public_path('space-invaders.js')) }}"></script>
     <script>
         if ('serviceWorker' in navigator) {
