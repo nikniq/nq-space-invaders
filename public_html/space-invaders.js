@@ -284,6 +284,7 @@ const SPR = {
     ufo: renderSprite(PIX.ufo, COLORS.ufo, SCALE),
     boss: renderSprite(PIX.boss, PAL.boss, SCALE + 1),
     bossFlash: renderSprite(PIX.boss, { '#': '#ffffff', 'o': '#ffffff' }, SCALE + 1),
+    carrier: renderSprite(PIX.boss, { '#': '#b06aff', 'o': '#7affff' }, SCALE + 1),
     burst: {},
 };
 for (const k of ['squid', 'crab', 'octopus', 'ufo', 'boss']) SPR.burst[k] = renderSprite(PIX.burst, COLORS[k], SCALE);
@@ -430,6 +431,7 @@ const POWERUP_PITY = 14; // a drop is guaranteed after this many kills without o
 const CHAIN_WINDOW = 1.8; // seconds between kills to keep a chain alive
 const DIVE_WINDUP = 0.55;  // seconds a diver shakes before leaving the fleet
 const DIVE_SPEED_MAX = 250; // px/s, before difficulty scaling
+const BOSS_BURST = 9; // bolts in an enraged boss's radial burst
 
 // Upgrades offered after every second wave and every boss. They stack for
 // the rest of the run.
@@ -897,6 +899,9 @@ function makeBoss() {
     return {
         x: W / 2 - SPR.boss.width / 2, y: 100, w: SPR.boss.width, h: SPR.boss.height,
         hp, maxHp: hp, t: 0, fireTimer: 2.5, flash: 0, points: 1000 + (G.wave / BOSS_EVERY - 1) * 500,
+        // Saucer on odd boss waves (5, 15, …), Carrier on even ones (10, 20, …).
+        kind: (G.wave / BOSS_EVERY) % 2 === 0 ? 'carrier' : 'saucer',
+        enraged: false, burstTimer: 1.5, burstSpin: 0, launchTimer: 3,
     };
 }
 
@@ -1513,7 +1518,8 @@ function update(dt) {
     if (G.boss) {
         const bs = G.boss;
         bs.t += dt;
-        bs.x = W / 2 - bs.w / 2 + Math.sin(bs.t * 0.9) * (W / 2 - bs.w / 2 - 30);
+        const sway = bs.kind === 'carrier' ? 0.55 : 0.9;
+        bs.x = W / 2 - bs.w / 2 + Math.sin(bs.t * sway * (bs.enraged ? 1.4 : 1)) * (W / 2 - bs.w / 2 - 30);
         bs.y = 100 + Math.sin(bs.t * 2.3) * 14;
         if (bs.flash > 0) bs.flash -= dt;
         if (bs.hp < bs.maxHp / 2 && Math.random() < dt * (bs.hp < bs.maxHp / 4 ? 30 : 14)) {
@@ -1527,7 +1533,46 @@ function update(dt) {
             spawnEnemyBullet(cx, cy, toPlayer * sp, 200 * sp);
             spawnEnemyBullet(cx - 20, cy, (toPlayer - 110) * sp, 190 * sp);
             spawnEnemyBullet(cx + 20, cy, (toPlayer + 110) * sp, 190 * sp);
-            bs.fireTimer = Math.max(0.9, 2.2 - G.wave * 0.05) * (bs.hp < bs.maxHp / 3 ? 0.6 : 1);
+            bs.fireTimer = Math.max(0.9, 2.2 - G.wave * 0.05) * (bs.hp < bs.maxHp / 3 ? 0.6 : 1) * (bs.kind === 'carrier' ? 1.4 : 1);
+        }
+
+        // Phase two at half health: a radial burst every few seconds.
+        if (!bs.enraged && bs.hp <= bs.maxHp / 2) {
+            bs.enraged = true;
+            banner('BOSS ENRAGED', '#ff3b3b', 30);
+            shakeScreen(6);
+            Sound.windup();
+        }
+        if (bs.enraged) {
+            bs.burstTimer -= dt;
+            if (bs.burstTimer <= 0) {
+                const cx = bs.x + bs.w / 2, cy = bs.y + bs.h / 2;
+                const sp = 150 * diff().bulletSpeed;
+                for (let i = 0; i < BOSS_BURST; i++) {
+                    const a = Math.PI * (0.12 + 0.76 * i / (BOSS_BURST - 1)) + bs.burstSpin;
+                    spawnEnemyBullet(cx, cy, Math.cos(a) * sp, Math.abs(Math.sin(a)) * sp + 40);
+                }
+                bs.burstSpin = bs.burstSpin ? 0 : 0.08;
+                bs.burstTimer = 3.2 * diff().fireRate;
+                Sound.snipe();
+            }
+        }
+
+        // The Carrier launches minions that dive once and are gone.
+        if (bs.kind === 'carrier') {
+            bs.launchTimer -= dt;
+            const minions = G.invaders.filter(i => i.alive && i.minion).length;
+            if (bs.launchTimer <= 0 && minions < 3) {
+                const spr = INVADER_TYPES.octopus.frames[0];
+                const mx = bs.x + bs.w / 2 - spr.width / 2, my = bs.y + bs.h;
+                G.invaders.push({
+                    type: 'octopus', col: -1, row: 9, x: mx, y: my, hx: mx, hy: my, w: spr.width, h: spr.height,
+                    alive: true, hp: 1, minion: true, sniperTimer: 0,
+                    dive: { phase: 'down', t: 0, wobble: rand(0, Math.PI * 2), aimX: player.x + player.w / 2 },
+                });
+                bs.launchTimer = (bs.enraged ? 2.2 : 3.2) * diff().fireRate;
+                Sound.dive();
+            }
         }
     }
 
@@ -1662,7 +1707,11 @@ function updateDiver(inv, dt) {
             killInvader(inv);
             if (!absorbed) return;
         }
-        if (inv.y > H + 20) { d.phase = 'return'; inv.y = -inv.h - 10; }
+        if (inv.y > H + 20) {
+            if (inv.minion) { inv.alive = false; return; }
+            d.phase = 'return';
+            inv.y = -inv.h - 10;
+        }
     } else {
         inv.x = inv.hx;
         inv.y += 320 * dt;
@@ -2034,7 +2083,12 @@ function drawPlayfield() {
         ctx.globalCompositeOperation = 'lighter';
         drawLight(bs.x + bs.w / 2, bs.y + bs.h + 6, 180, COLORS.boss, 0.25 + 0.1 * Math.sin(G.time * 5));
         ctx.globalCompositeOperation = 'source-over';
-        drawSprite(bs.flash > 0 ? SPR.bossFlash : SPR.boss, bs.x, bs.y, 0.8);
+        if (bs.enraged) {
+            ctx.globalCompositeOperation = 'lighter';
+            drawLight(bs.x + bs.w / 2, bs.y + bs.h / 2, 220, '#ff3b3b', 0.2 + 0.15 * Math.sin(G.time * 10));
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        drawSprite(bs.flash > 0 ? SPR.bossFlash : bs.kind === 'carrier' ? SPR.carrier : SPR.boss, bs.x, bs.y, 0.8);
         // Engine lights along the underside, blinking in sequence.
         for (let i = 0; i < 5; i++) {
             const on = (Math.floor(G.time * 6) + i) % 5 === 0;

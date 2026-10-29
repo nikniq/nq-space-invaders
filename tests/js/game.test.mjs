@@ -493,6 +493,46 @@ test('guests are invited to sign in instead of having their score posted', async
     assert.equal(g.api.Online.status, 'SIGN IN TO SAVE SCORES ONLINE');
 });
 
+// ---------------------------------------------------------------- bosses
+
+test('boss type alternates: saucer on wave 5, carrier on wave 10', () => {
+    const g = makeGame();
+    playWave(g, 5);
+    assert.equal(g.G.boss.kind, 'saucer');
+    const h = makeGame();
+    playWave(h, 10);
+    assert.equal(h.G.boss.kind, 'carrier');
+});
+
+test('a boss enrages at half health and fires a radial burst', () => {
+    const g = makeGame();
+    playWave(g, 5);
+    g.G.boss.hp = Math.floor(g.G.boss.maxHp / 2);
+    g.G.boss.fireTimer = 99;
+    g.G.enemyBullets = [];
+    g.api.update(STEP);
+    assert.equal(g.G.boss.enraged, true);
+    assert.match(g.G.banner.text, /ENRAGED/);
+    g.run(1.6);
+    assert.ok(g.G.enemyBullets.length >= 9, `expected a burst, saw ${g.G.enemyBullets.length} bolts`);
+});
+
+test('the carrier launches diving minions that leave without scoring', () => {
+    const g = makeGame();
+    playWave(g, 10);
+    g.G.invaders.forEach(i => { if (!i.minion) i.alive = false; });
+    g.G.boss.launchTimer = 0.001;
+    g.api.update(STEP);
+    const minion = g.G.invaders.find(i => i.minion && i.alive);
+    assert.ok(minion, 'carrier should launch a minion');
+    const score = g.G.score;
+    g.G.player.x = minion.x > 400 ? 20 : 700; // stay out of its way
+    g.G.boss.launchTimer = 99;
+    g.run(5);
+    assert.equal(minion.alive, false, 'minion is gone after its dive');
+    assert.equal(g.G.score, score);
+});
+
 // ---------------------------------------------------------------- medals
 
 test('medals are earned once, announced, and remembered across games', () => {
