@@ -821,6 +821,7 @@ function chainUp() {
         const colors = ['', '', '', '#5ad7ff', COLORS.player, '#ffd25a', '#ff8c3b', '#ff6ad5', '#ff3b3b'];
         banner(CHAIN_NAMES[m] + '  x' + m, colors[m], 26 + m * 2);
         Sound.chain(m);
+        if (m === 8) award('chain8');
     }
 }
 
@@ -928,6 +929,7 @@ function startGame() {
     G.perks = {};
     G.lastEntry = null;
     G.stats = { shots: 0, hits: 0 };
+    G.medalsThisGame = [];
     G.displayScore = 0;
     G.prevBest = G.hiScore;
     G.killsSinceDrop = 0;
@@ -954,6 +956,8 @@ function startWave() {
     G.diveTimer = rand(4, 7);
     G.ufo = null;
     G.ufoTimer = rand(12, 20) * (perk('bounty') ? 0.55 : 1);
+    if (G.wave >= 10) award('wave10');
+    if (G.wave >= 5 && G.difficulty === 'hard') award('hard5');
     if (perk('deflector')) G.shield = G.shieldMax = 8;
     if (G.wave > 1) G.bunkers = makeBunkers();
 }
@@ -961,6 +965,7 @@ function startWave() {
 function addScore(n) {
     G.score += n;
     G.scorePulse = 1;
+    if (G.score >= 10000) award('score10k');
     if (G.score > G.hiScore) {
         G.hiScore = G.score;
         if (!G.newHiScore && G.prevBest > 0) {
@@ -1068,6 +1073,7 @@ function detonateBomb() {
     shakeScreen(10);
     G.flash = G.reduceMotion ? 0.3 : 0.8;
     G.hitstop = Math.max(G.hitstop, 0.08);
+    award('bomb');
     Sound.bossDie();
 }
 
@@ -1128,6 +1134,7 @@ function choosePerk(i) {
     if (G.state !== 'perk' || G.perkLock > 0 || !G.perkChoices[i]) return;
     const pk = G.perkChoices[i];
     G.perks[pk.id] = perk(pk.id) + 1;
+    if (PERKS.filter(x => x.id !== 'life' && perk(x.id) > 0).length >= 3) award('perks3');
     if (pk.id === 'life') G.lives = Math.min(MAX_LIVES, G.lives + 1);
     Sound.powerup();
     nextWave();
@@ -1396,6 +1403,7 @@ function update(dt) {
             popup(G.ufo.x + G.ufo.w / 2, G.ufo.y, String(pts), COLORS.ufo, 1.4);
             Sound.ufoHit();
             G.hitstop = 0.06;
+            award('ufo');
             G.ufo = null;
             b.dead = true;
             continue;
@@ -1583,6 +1591,8 @@ function update(dt) {
         const acc = ws.shots ? Math.min(1, ws.hits / ws.shots) : 0;
         G.tally = [{ label: 'WAVE CLEAR', value: 100 * G.wave }];
         G.tally.push({ label: 'ACCURACY ' + Math.round(acc * 100) + '%', value: Math.round(acc * 100) * 2 * G.wave });
+        if (!G.waveLostLife) award('perfect');
+        if (acc >= 0.9 && ws.shots >= 10) award('sharp');
         if (!G.waveLostLife) G.tally.push({ label: 'NO DAMAGE', value: 100 * G.wave });
         if (ws.bestChain >= 5) G.tally.push({ label: 'BEST CHAIN ' + ws.bestChain, value: ws.bestChain * 5 * G.wave });
         G.tallyShown = 0;
@@ -1605,6 +1615,7 @@ function killBoss() {
     G.boss = null;
     Sound.bossDie();
     G.hitstop = 0.3;
+    award('boss');
 }
 
 // A hit on the player. Returns true if it was absorbed (invincible or
@@ -1730,6 +1741,38 @@ const Online = {
     },
 };
 Online.loadBoard();
+
+// ---------------------------------------------------------------------------
+// Medals: one-time achievements kept in this browser.
+// ---------------------------------------------------------------------------
+const MEDALS = [
+    { id: 'ufo', name: 'UFO HUNTER', desc: 'Shoot down a UFO' },
+    { id: 'bomb', name: 'DEMOLITION', desc: 'Detonate a bomb' },
+    { id: 'perfect', name: 'FLAWLESS', desc: 'Clear a wave without losing a life' },
+    { id: 'sharp', name: 'SHARPSHOOTER', desc: 'Clear a wave with 90% accuracy' },
+    { id: 'chain8', name: 'UNSTOPPABLE', desc: 'Reach a x8 chain' },
+    { id: 'boss', name: 'GIANT SLAYER', desc: 'Defeat a boss' },
+    { id: 'perks3', name: 'UPGRADED', desc: 'Hold three upgrades at once' },
+    { id: 'score10k', name: '10K CLUB', desc: 'Score 10,000 points in one game' },
+    { id: 'wave10', name: 'VETERAN', desc: 'Reach wave 10' },
+    { id: 'hard5', name: 'HARDCORE', desc: 'Reach wave 5 on Hard' },
+];
+const MEDALS_KEY = 'nq-space-invaders-medals';
+function loadMedals() {
+    try { const m = JSON.parse(localStorage.getItem(MEDALS_KEY) || '[]'); return Array.isArray(m) ? m : []; } catch (e) { return []; }
+}
+G.medals = loadMedals();
+G.medalsThisGame = [];
+function award(id) {
+    if (G.medals.includes(id)) return;
+    const medal = MEDALS.find(m => m.id === id);
+    if (!medal) return;
+    G.medals.push(id);
+    G.medalsThisGame.push(id);
+    try { localStorage.setItem(MEDALS_KEY, JSON.stringify(G.medals)); } catch (e) { /* ignore */ }
+    toast('MEDAL: ' + medal.name);
+    Sound.extraLife();
+}
 
 function endGame() {
     Online.submit(G.score, G.wave);
@@ -2150,6 +2193,7 @@ function drawStartScreen() {
     text('SPACE', W / 2, 90, 56, COLORS.player);
     text('INVADERS', W / 2, 155, 56, COLORS.player);
     drawTitleShine();
+    text('MEDALS ' + G.medals.length + '/' + MEDALS.length, W - 24, 24, 10, '#ffd25a', 'right');
 
     const rows = [
         [SPR.ufo, '= ? MYSTERY', COLORS.ufo],
@@ -2318,6 +2362,7 @@ function drawOverlay() {
         const acc = G.stats.shots ? Math.round(100 * G.stats.hits / G.stats.shots) : 0;
         text('ACCURACY ' + acc + '%   SHOTS ' + G.stats.shots + (G.comboBest >= 5 ? '   BEST COMBO ' + G.comboBest : ''), W / 2, 172, 11, '#9ad');
         const mine = G.scores.find(e => e.score === G.score && G.lastEntry && e.name === G.lastEntry.join(''));
+        if (G.medalsThisGame.length) text('NEW MEDALS: ' + G.medalsThisGame.map(id => MEDALS.find(m => m.id === id).name).join(' · '), W / 2, 214, 9, '#ffd25a');
         if (Online.status) text(Online.status, W / 2, 198, 11, /SAVED/.test(Online.status) ? COLORS.player : '#9ad');
         drawScoreboard(230, mine);
         const blink = Math.sin(G.time * 5) > -0.2;
@@ -2619,5 +2664,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS, Online };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS, Online, MEDALS };
 })();

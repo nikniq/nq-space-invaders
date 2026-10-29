@@ -9,6 +9,7 @@ A classic Space Invaders game implemented in HTML5 canvas and JavaScript with SV
 - **Formations** rotate each wave: block, gapped columns, wedge and checkerboard
 - **Armoured invaders** (from wave 3) crack on the first hit and break on the second; **snipers** (from wave 4) glow for half a second, then fire a fast bolt aimed at you
 - **Upgrades** after every second wave and every boss: pick one of three (Twin Cannon, Hair Trigger, Chain Link, Overcharge, Tractor Beam, Deflector, Thrusters, Lucky Star, Bounty Hunter, Spare Ship). They stack for the rest of the run and show as badges at the bottom of the screen
+- **Medals**: ten one-time achievements (UFO Hunter, Demolition, Flawless, Sharpshooter, Unstoppable, Giant Slayer, Upgraded, 10K Club, Veteran, Hardcore), announced when earned, listed on the game-over screen and counted on the title screen; kept in your browser
 - **Boss every fifth wave**: a large saucer with a health bar that sweeps the top of the screen firing three-way volleys
 - **Power-ups** dropped by dying invaders: Rapid fire (R), Spread shot (S), Piercing bolts (P), Shield (H), Bomb (B, wipes out the lowest invader in every column), extra life (L). A drop is guaranteed if you go 14 kills without one
 - **Chains**: every hit within 1.8 seconds of the last extends your chain, raising the score multiplier up to x8 with NICE / GREAT / AWESOME / UNSTOPPABLE call-outs and a rising chime. Misses only cost accuracy

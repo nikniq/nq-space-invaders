@@ -493,6 +493,32 @@ test('guests are invited to sign in instead of having their score posted', async
     assert.equal(g.api.Online.status, 'SIGN IN TO SAVE SCORES ONLINE');
 });
 
+// ---------------------------------------------------------------- medals
+
+test('medals are earned once, announced, and remembered across games', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.api.applyPowerup('bomb');
+    assert.deepEqual([...g.G.medals], ['bomb']);
+    assert.match(g.G.toast.text, /DEMOLITION/);
+    g.api.applyPowerup('bomb');
+    assert.equal(g.G.medals.length, 1, 'not awarded twice');
+    const again = makeGame({ storage: { ...g.store } });
+    assert.deepEqual([...again.G.medals], ['bomb']);
+});
+
+test('clearing a wave without damage and accurately earns Flawless and Sharpshooter', () => {
+    const g = makeGame();
+    g.startPlaying();
+    for (const inv of g.alive().slice(0, 10)) g.hit(inv);
+    g.G.waveStats.shots = 10;
+    g.G.invaders.forEach(i => { i.alive = false; });
+    g.api.update(STEP);
+    assert.ok(g.G.medals.includes('perfect'));
+    assert.ok(g.G.medals.includes('sharp'));
+    assert.ok(g.G.medals.includes('chain8') === false);
+});
+
 // ---------------------------------------------------------------- core systems
 
 test('boss arrives on wave 5; killing it lets the wave advance', () => {
