@@ -533,6 +533,46 @@ test('the carrier launches diving minions that leave without scoring', () => {
     assert.equal(g.G.score, score);
 });
 
+// ---------------------------------------------------------------- overdrive
+
+test('kills charge overdrive; it cannot fire until full', () => {
+    const g = makeGame();
+    g.startPlaying();
+    for (const inv of g.alive().slice(0, 10)) g.hit(inv);
+    assert.ok(g.G.overdrive > 0.3 && g.G.overdrive < 1);
+    assert.equal(g.api.activateOverdrive(), false);
+    assert.equal(g.G.beam, 0);
+});
+
+test('a full meter fires a beam that clears the ship\'s column and enemy fire', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.overdrive = 1;
+    g.G.fleetTimer = -10;
+    const target = g.alive().find(i => i.col === 5);
+    g.G.player.x = target.x + target.w / 2 - g.G.player.w / 2;
+    g.G.enemyBullets = [{ x: g.G.player.x + g.G.player.w / 2, y: 300, w: 4, h: 14, vx: 0, vy: 0, wobble: 0 }];
+    g.key('ShiftLeft');
+    assert.ok(g.G.beam > 0);
+    assert.equal(g.G.overdrive, 0);
+    g.run(0.1);
+    assert.equal(g.alive().filter(i => i.col === 5).length, 0, 'column 5 vaporised');
+    assert.equal(g.G.enemyBullets.length, 0);
+    g.run(3);
+    assert.equal(g.G.beam, 0, 'beam ends');
+});
+
+test('the beam grinds down a boss', () => {
+    const g = makeGame();
+    playWave(g, 5);
+    g.G.boss.hp = 100;
+    g.G.boss.maxHp = 100;
+    g.G.overdrive = 1;
+    g.api.activateOverdrive();
+    g.run(1.0, () => { g.G.player.x = g.G.boss.x + g.G.boss.w / 2 - g.G.player.w / 2; });
+    assert.ok(g.G.boss.hp <= 95, `boss hp ${g.G.boss.hp}`);
+});
+
 // ---------------------------------------------------------------- medals
 
 test('medals are earned once, announced, and remembered across games', () => {

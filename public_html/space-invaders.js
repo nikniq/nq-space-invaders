@@ -810,7 +810,56 @@ function multiplier() { return Math.min(8, 1 + Math.floor(G.combo / 4)); }
 
 // Every hit extends the chain. Reaching a new multiplier from x3 up
 // announces itself with a banner and a rising chime.
+// Overdrive: kills charge a meter; when full, a laser beam fires straight up
+// from the ship for a few seconds, vaporising whatever it touches.
+const OVERDRIVE_PER_HIT = 0.035;
+const OVERDRIVE_SECONDS = 2.6;
+const BEAM_W = 26;
+function chargeOverdrive(amount) {
+    if (G.beam > 0 || G.overdrive >= 1) return;
+    G.overdrive = Math.min(1, G.overdrive + amount);
+    if (G.overdrive >= 1) {
+        banner('OVERDRIVE READY', '#7affff', 26);
+        Sound.powerup();
+    }
+}
+function activateOverdrive() {
+    if (G.state !== 'playing' || G.overdrive < 1 || G.beam > 0) return false;
+    G.overdrive = 0;
+    G.beam = OVERDRIVE_SECONDS;
+    shakeScreen(5);
+    Sound.bossDie();
+    return true;
+}
+function beamRect() {
+    const p = G.player;
+    return { x: p.x + p.w / 2 - BEAM_W / 2, y: 0, w: BEAM_W, h: p.y };
+}
+function updateBeam(dt) {
+    G.beam = Math.max(0, G.beam - dt);
+    const r = beamRect();
+    for (const inv of G.invaders) if (inv.alive && overlaps(r, inv)) killInvader(inv);
+    for (const eb of G.enemyBullets) if (!eb.dead && overlaps(r, eb)) { eb.dead = true; burst(eb.x, eb.y, '#7affff', 3, 60); }
+    if (G.ufo && overlaps(r, G.ufo)) {
+        addScore(G.ufo.points);
+        burst(G.ufo.x + G.ufo.w / 2, G.ufo.y + G.ufo.h / 2, COLORS.ufo, 30, 240);
+        G.ufo = null;
+        award('ufo');
+    }
+    if (G.boss && overlaps(r, G.boss)) {
+        G.boss.beamAcc = (G.boss.beamAcc || 0) + dt * 6; // 6 damage per second
+        while (G.boss && G.boss.beamAcc >= 1) {
+            G.boss.beamAcc -= 1;
+            G.boss.hp -= 1;
+            G.boss.flash = 0.06;
+            if (G.boss.hp <= 0) killBoss();
+        }
+    }
+    if (Math.random() < dt * 40) burst(r.x + rand(0, BEAM_W), rand(0, r.h), '#7affff', 2, 80);
+}
+
 function chainUp() {
+    chargeOverdrive(OVERDRIVE_PER_HIT);
     const before = multiplier();
     G.combo += 1;
     G.comboTimer = chainWindow();
@@ -932,6 +981,8 @@ function startGame() {
     G.power = { type: null, timer: 0 };
     G.shield = 0;
     G.perks = {};
+    G.overdrive = 0;
+    G.beam = 0;
     G.lastEntry = null;
     G.stats = { shots: 0, hits: 0 };
     G.medalsThisGame = [];
@@ -1237,7 +1288,7 @@ function hintText(kind) {
     switch (kind) {
         case 'start': return m === 'touch' ? 'TAP TO START' : m === 'pad' ? 'PRESS START OR A TO BEGIN' : 'PRESS ENTER OR SPACE TO START';
         case 'again': return m === 'touch' ? 'TAP TO PLAY AGAIN' : m === 'pad' ? 'PRESS START TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN';
-        case 'controls': return m === 'touch' ? 'DRAG TO MOVE · TAP TO FIRE' : m === 'pad' ? 'STICK OR D-PAD MOVE · A FIRE · START PAUSE' : '← → MOVE · SPACE FIRE · P PAUSE · M MUTE · F FULLSCREEN';
+        case 'controls': return m === 'touch' ? 'DRAG TO MOVE · TAP TO FIRE' : m === 'pad' ? 'STICK OR D-PAD MOVE · A FIRE · START PAUSE' : '← → MOVE · SPACE FIRE · SHIFT OVERDRIVE · P PAUSE · M MUTE';
         case 'difficulty': return m === 'touch' ? 'USE ◀ ▶ BELOW TO CHANGE DIFFICULTY' : m === 'pad' ? 'STICK LEFT / RIGHT TO CHANGE DIFFICULTY' : '← → TO CHANGE DIFFICULTY';
         case 'perk': return m === 'touch' ? 'TAP AN UPGRADE' : m === 'pad' ? 'D-PAD CHOOSE · A TAKE' : '← → OR 1-3 CHOOSE · ENTER TAKE';
         case 'menu': return m === 'touch' ? 'TAP AN OPTION' : m === 'pad' ? 'D-PAD SELECT · A CONFIRM · START RESUME' : '↑ ↓ SELECT · ENTER CONFIRM · P RESUME';
@@ -1379,6 +1430,8 @@ function update(dt) {
         G.fireCooldown = (G.power.type === 'rapid' ? RAPID_COOLDOWN : FIRE_COOLDOWN) * Math.pow(0.8, perk('trigger'));
     }
     input.fireBuffer = Math.max(0, input.fireBuffer - dt);
+
+    if (G.beam > 0) updateBeam(dt);
 
     // Player bullets
     for (const b of G.playerBullets) {
@@ -1722,6 +1775,8 @@ function updateDiver(inv, dt) {
 function killPlayer(invaded) {
     if (G.state !== 'playing') return;
     G.waveLostLife = true;
+    G.overdrive *= 0.5;
+    G.beam = 0;
     const p = G.player;
     shatter(PIX.player, p.x, p.y, SCALE, PAL.player, 1.6);
     burst(p.x + p.w / 2, p.y + p.h / 2, COLORS.player, 24, 260);
@@ -1992,6 +2047,16 @@ function drawHud() {
         ctx.drawImage(SPR.player, 48 + i * 34, H - 24, SPR.player.width * 0.6, SPR.player.height * 0.6);
     }
     drawPerkBadges();
+    // Overdrive meter, above the lives
+    {
+        const full = G.overdrive >= 1;
+        const col = full ? (Math.sin(G.time * 10) > 0 ? '#ffffff' : '#7affff') : '#3a8a99';
+        text(full ? 'OVERDRIVE! ' + (G.inputMode === 'touch' ? 'TAP MAX' : G.inputMode === 'pad' ? 'PRESS B' : 'PRESS SHIFT') : 'OVERDRIVE', 24, H - 44, 8, col, 'left');
+        ctx.fillStyle = '#1a2224';
+        ctx.fillRect(24, H - 38, 130, 4);
+        ctx.fillStyle = G.beam > 0 ? '#ffffff' : '#7affff';
+        ctx.fillRect(24, H - 38, 130 * (G.beam > 0 ? G.beam / OVERDRIVE_SECONDS : G.overdrive), 4);
+    }
     if (Sound.muted) text('MUTED', W - 24, H - 14, 12, '#888', 'right');
 }
 
@@ -2095,6 +2160,22 @@ function drawPlayfield() {
             ctx.fillStyle = on ? '#fff3c0' : '#7a3a10';
             ctx.fillRect(Math.round(bs.x + bs.w * (0.2 + i * 0.15)) - 2, Math.round(bs.y + bs.h * 0.62), 4, 4);
         }
+    }
+    if (G.beam > 0 && G.player) {
+        const r = beamRect();
+        const fade = Math.min(1, G.beam / 0.3);
+        const wob = 1 + 0.15 * Math.sin(G.time * 50);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = 'rgba(122,255,255,0.35)';
+        ctx.fillRect(r.x - 10 * wob, 0, r.w + 20 * wob, r.h);
+        ctx.fillStyle = 'rgba(200,255,255,0.8)';
+        ctx.fillRect(r.x + 4, 0, r.w - 8, r.h);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(r.x + r.w / 2 - 3, 0, 6, r.h);
+        drawLight(r.x + r.w / 2, r.h, 120, '#7affff', 0.8);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
     }
     drawPlayer();
 
@@ -2569,6 +2650,7 @@ document.addEventListener('keydown', e => {
         case 'KeyM': toggleMute(); break;
         case 'KeyF': toggleFullscreen(); break;
         case 'KeyC': if (G.state === 'gameover') shareScore(); break;
+        case 'ShiftLeft': case 'ShiftRight': case 'KeyX': activateOverdrive(); break;
     }
 });
 document.addEventListener('keyup', e => {
@@ -2630,6 +2712,9 @@ function pollGamepad() {
     const right = ax > 0.4 || (gp.buttons[15] && gp.buttons[15].pressed);
     const fireBtn = (gp.buttons[0] && gp.buttons[0].pressed) || (gp.buttons[7] && gp.buttons[7].pressed);
     const start = gp.buttons[9] && gp.buttons[9].pressed;
+    const odBtn = gp.buttons[1] && gp.buttons[1].pressed;
+    if (odBtn && !pad_.od) activateOverdrive();
+    pad_.od = odBtn;
     const up = (gp.buttons[12] && gp.buttons[12].pressed) || (gp.axes[1] || 0) < -0.5;
     const down = (gp.buttons[13] && gp.buttons[13].pressed) || (gp.axes[1] || 0) > 0.5;
     if (left || right || fireBtn || start || up || down) G.inputMode = 'pad';
@@ -2659,6 +2744,7 @@ function buildTouchControls() {
     };
     const left = mk('◀', 'tc-left');
     const fireB = mk('FIRE', 'tc-fire');
+    const odB = mk('MAX', 'tc-od');
     const right = mk('▶', 'tc-right');
     const hold = (el, fn) => {
         const start = e => { e.preventDefault(); Sound.init(); G.inputMode = 'touch'; fn(true); };
@@ -2671,6 +2757,7 @@ function buildTouchControls() {
     hold(left, pressLeft);
     hold(right, pressRight);
     hold(fireB, pressFire);
+    hold(odB, down => { if (down) activateOverdrive(); });
     canvas.parentNode.appendChild(wrap);
 }
 buildTouchControls();
@@ -2718,5 +2805,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS, Online, MEDALS };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS, Online, MEDALS, activateOverdrive };
 })();

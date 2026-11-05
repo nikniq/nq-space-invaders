@@ -78,7 +78,7 @@
         #account .status { color: #3cff5a; margin-right: auto; }
         #touchControls {
             display: none;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr 0.8fr;
             gap: 10px;
             width: 100%;
             padding-bottom: env(safe-area-inset-bottom);
@@ -97,6 +97,7 @@
         #touchControls button:active { background: #1f3a22; border-color: #3cff5a; }
         #touchControls .tc-fire { color: #ffd25a; border-color: #ffd25a66; }
         #touchControls .tc-fire:active { background: #3a3215; border-color: #ffd25a; }
+        #touchControls .tc-od { color: #7affff; border-color: #7affff66; font-size: 12px; }
         @media (pointer: coarse) {
             #touchControls { display: grid; }
             #gameWrap { width: min(100%, 800px, calc((100dvh - 120px) * 4 / 3)); }
@@ -110,7 +111,7 @@
             #touchControls {
                 position: absolute;
                 left: 0; right: 0; bottom: 0;
-                grid-template-columns: 1fr 1fr 1fr;
+                grid-template-columns: 1fr 1fr 1fr 0.8fr;
                 padding: 0 8px 8px;
                 pointer-events: none;
             }
