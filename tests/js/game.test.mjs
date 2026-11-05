@@ -573,6 +573,32 @@ test('the beam grinds down a boss', () => {
     assert.ok(g.G.boss.hp <= 95, `boss hp ${g.G.boss.hp}`);
 });
 
+test('a bolt slipping just past the ship grazes once for points and charge', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.fleetTimer = -10;
+    g.G.enemyFireTimer = 99;
+    g.G.player.invuln = 0;
+    const p = g.G.player;
+    const before = g.G.score;
+    g.G.enemyBullets = [{ x: p.x + p.w + 6, y: p.y - 30, w: 4, h: 14, vx: 0, vy: 300, wobble: 0 }];
+    g.run(0.4, () => { g.G.enemyFireTimer = 99; });
+    assert.equal(g.G.grazes, 1);
+    assert.equal(g.G.score - before, 25);
+    assert.ok(g.G.overdrive > 0);
+    assert.ok(g.G.lives > 0 && g.G.state === 'playing');
+});
+
+test('bolts far from the ship never graze', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.player.invuln = 0;
+    const p = g.G.player;
+    g.G.enemyBullets = [{ x: p.x + p.w + 40, y: p.y - 30, w: 4, h: 14, vx: 0, vy: 300, wobble: 0 }];
+    g.run(0.4, () => { g.G.enemyFireTimer = 99; });
+    assert.equal(g.G.grazes, 0);
+});
+
 // ---------------------------------------------------------------- medals
 
 test('medals are earned once, announced, and remembered across games', () => {

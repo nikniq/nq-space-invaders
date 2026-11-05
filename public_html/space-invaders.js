@@ -722,6 +722,7 @@ const G = {
     player: null,
     playerBullets: [],
     enemyBullets: [],
+    grazes: 0,
     invaders: [],
     fleetDir: 1,
     fleetTimer: 0,
@@ -858,6 +859,25 @@ function updateBeam(dt) {
     if (Math.random() < dt * 40) burst(r.x + rand(0, BEAM_W), rand(0, r.h), '#7affff', 2, 80);
 }
 
+// Graze: an enemy bolt that slips past within a few pixels of the ship
+// pays out points and overdrive charge, rewarding brave dodging.
+const GRAZE_DIST = 12;
+const GRAZE_POINTS = 25;
+const GRAZE_CHARGE = 0.02;
+function checkGraze(eb, p) {
+    if (p.invuln > 0) return;
+    if (eb.y + eb.h < p.y || eb.y > p.y + p.h) return;
+    const gap = Math.max(p.x - (eb.x + eb.w), eb.x - (p.x + p.w));
+    if (gap < 0 || gap > GRAZE_DIST) return;
+    eb.grazed = true;
+    G.grazes += 1;
+    if (G.grazes >= 25) award('graze25');
+    addScore(GRAZE_POINTS * multiplier());
+    chargeOverdrive(GRAZE_CHARGE);
+    popup(eb.x, p.y - 6, 'GRAZE', '#7affff', 0.6, 11);
+    burst(eb.x + eb.w / 2, eb.y + eb.h / 2, '#7affff', 4, 70);
+}
+
 function chainUp() {
     chargeOverdrive(OVERDRIVE_PER_HIT);
     const before = multiplier();
@@ -985,6 +1005,7 @@ function startGame() {
     G.beam = 0;
     G.lastEntry = null;
     G.stats = { shots: 0, hits: 0 };
+    G.grazes = 0;
     G.medalsThisGame = [];
     G.displayScore = 0;
     G.prevBest = G.hiScore;
@@ -1643,6 +1664,7 @@ function update(dt) {
             eb.dead = true;
             if (!hitPlayer()) return;
         }
+        if (!eb.dead && !eb.grazed) checkGraze(eb, player);
     }
     G.enemyBullets = G.enemyBullets.filter(b => !b.dead);
 
@@ -1860,6 +1882,7 @@ const MEDALS = [
     { id: 'score10k', name: '10K CLUB', desc: 'Score 10,000 points in one game' },
     { id: 'wave10', name: 'VETERAN', desc: 'Reach wave 10' },
     { id: 'hard5', name: 'HARDCORE', desc: 'Reach wave 5 on Hard' },
+    { id: 'graze25', name: 'DAREDEVIL', desc: 'Graze 25 enemy bolts in one game' },
 ];
 const MEDALS_KEY = 'nq-space-invaders-medals';
 function loadMedals() {
