@@ -901,6 +901,21 @@ function banner(text, color, size = 28) {
 }
 function isBossWave(w = G.wave) { return w % BOSS_EVERY === 0; }
 
+// Wave modifiers: from wave 6, every even non-boss wave gets a random twist
+// that makes it harder (or richer) and pays a points bonus while it lasts.
+const MODIFIERS = {
+    swift:   { name: 'SWIFT FLEET', desc: 'The fleet marches faster', color: '#ff8c3b', bonus: 1.5 },
+    barrage: { name: 'BARRAGE', desc: 'Invaders fire far more often', color: '#ff3b3b', bonus: 1.5 },
+    gold:    { name: 'GOLD RUSH', desc: 'Power-ups drop much more often', color: '#ffd25a', bonus: 1 },
+};
+function modifierFor(w) {
+    if (w < 6 || w % 2 !== 0 || isBossWave(w)) return null;
+    const ids = Object.keys(MODIFIERS);
+    return ids[Math.floor(Math.random() * ids.length)];
+}
+function mod(id) { return G.modifier === id; }
+function modBonus() { return G.modifier ? MODIFIERS[G.modifier].bonus : 1; }
+
 function makePlayer() {
     return { x: W / 2 - SPR.player.width / 2, y: H - 70, w: SPR.player.width, h: SPR.player.height, speed: 340, invuln: 2.0 };
 }
@@ -1006,6 +1021,7 @@ function startGame() {
     G.lastEntry = null;
     G.stats = { shots: 0, hits: 0 };
     G.grazes = 0;
+    G.modifier = null;
     G.medalsThisGame = [];
     G.displayScore = 0;
     G.prevBest = G.hiScore;
@@ -1019,6 +1035,7 @@ function startGame() {
 function startWave() {
     G.invaders = makeFleet();
     G.boss = isBossWave() ? makeBoss() : null;
+    G.modifier = modifierFor(G.wave);
     G.fleetDir = 1;
     G.fleetTimer = 0;
     G.fleetFrame = 0;
@@ -1099,7 +1116,7 @@ function popup(x, y, text, color = '#fff', life = 1.0, size = 14) {
 
 function dropPowerup(x, y) {
     G.killsSinceDrop += 1;
-    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop * (1 + 0.35 * perk('lucky')) && G.killsSinceDrop < POWERUP_PITY - 3 * perk('lucky')) return;
+    if (Math.random() > POWERUP_DROP_CHANCE * diff().drop * (mod('gold') ? 2.5 : 1) * (1 + 0.35 * perk('lucky')) && G.killsSinceDrop < POWERUP_PITY - 3 * perk('lucky')) return;
     G.killsSinceDrop = 0;
     const total = Object.values(POWERUPS).reduce((s, p) => s + p.weight, 0);
     let r = Math.random() * total;
@@ -1227,7 +1244,7 @@ function movePerk(dir) {
 function killInvader(inv) {
     inv.alive = false;
     chainUp();
-    const pts = INVADER_TYPES[inv.type].points * multiplier();
+    const pts = Math.round(INVADER_TYPES[inv.type].points * multiplier() * modBonus());
     addScore(pts);
     const cx = inv.x + inv.w / 2, cy = inv.y + inv.h / 2;
     shatter(PIX[inv.type][G.fleetFrame], inv.x, inv.y, SCALE, PAL[inv.type]);
@@ -1329,7 +1346,7 @@ function aliveInvaders() { return G.invaders.filter(i => i.alive); }
 function fleetInterval(aliveCount) {
     const total = G.invaders.length;
     const base = Math.max(0.14, 0.55 - (G.wave - 1) * 0.04);
-    return Math.max(0.035, base * Math.pow(aliveCount / total, 0.8) + 0.03) * diff().fleet;
+    return Math.max(0.035, base * Math.pow(aliveCount / total, 0.8) + 0.03) * diff().fleet * (mod('swift') ? 0.7 : 1);
 }
 
 function spawnEnemyBullet(x, y, vx, vy) {
@@ -1568,7 +1585,7 @@ function update(dt) {
 
         // Enemy fire — bottom-most invader of a random column.
         G.enemyFireTimer -= dt;
-        const maxEnemyBullets = clamp(3 + Math.floor(G.wave / 2) + diff().extraBullets, 1, 7);
+        const maxEnemyBullets = clamp(3 + Math.floor(G.wave / 2) + diff().extraBullets, 1, 7) + (mod('barrage') ? 2 : 0);
         if (G.enemyFireTimer <= 0 && G.enemyBullets.length < maxEnemyBullets) {
             const cols = {};
             for (const inv of alive) {
@@ -1584,7 +1601,7 @@ function update(dt) {
                 shooter = shooters[Math.floor(Math.random() * shooters.length)];
             }
             spawnEnemyBullet(shooter.x + shooter.w / 2, shooter.y + shooter.h, 0, (170 + G.wave * 15) * diff().bulletSpeed);
-            G.enemyFireTimer = Math.max(0.35, rand(0.9, 1.5) - G.wave * 0.07) * diff().fireRate;
+            G.enemyFireTimer = Math.max(0.35, rand(0.9, 1.5) - G.wave * 0.07) * diff().fireRate * (mod('barrage') ? 0.55 : 1);
         }
     }
 
@@ -2488,6 +2505,11 @@ function drawOverlay() {
         const title = G.boss ? 'BOSS WAVE ' + G.wave : 'WAVE ' + G.wave;
         text(title, W / 2, H / 2 - 40, 32, G.boss ? COLORS.boss : COLORS.player);
         text('GET READY', W / 2, H / 2 + 6, 18, '#ffd25a');
+        if (G.modifier) {
+            const m = MODIFIERS[G.modifier];
+            text(m.name + (m.bonus > 1 ? '  ·  x' + m.bonus + ' POINTS' : ''), W / 2, H / 2 - 82, 16, m.color);
+            text(m.desc, W / 2, H / 2 - 64, 10, '#ccd');
+        }
         if (G.wave === 1 || G.inputMode === 'touch') text(hintText('controls'), W / 2, H / 2 + 46, 10, '#9ad');
     } else if (G.state === 'wavecleared') {
         text('WAVE ' + G.wave + ' CLEARED', W / 2, H / 2 - 110, 32, COLORS.player);
@@ -2828,5 +2850,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, formationFor, PERKS, Online, MEDALS, activateOverdrive };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, MODIFIERS, modifierFor, formationFor, PERKS, Online, MEDALS, activateOverdrive };
 })();

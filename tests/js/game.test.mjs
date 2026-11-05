@@ -599,6 +599,32 @@ test('bolts far from the ship never graze', () => {
     assert.equal(g.G.grazes, 0);
 });
 
+// ---------------------------------------------------------------- modifiers
+
+test('modifiers only appear on even non-boss waves from wave 6', () => {
+    const g = makeGame();
+    for (const wave of [1, 2, 4, 5, 7, 9, 10, 20]) {
+        assert.equal(g.api.modifierFor(wave), null, `wave ${wave}`);
+    }
+    for (const wave of [6, 8, 12]) {
+        assert.ok(g.api.MODIFIERS[g.api.modifierFor(wave)], `wave ${wave}`);
+    }
+});
+
+test('a modifier bonus multiplies invader points', () => {
+    const g = makeGame();
+    g.startPlaying();
+    const inv = g.alive()[0];
+    g.G.modifier = 'swift';
+    const before = g.G.score;
+    g.hit(inv);
+    const plain = makeGame();
+    plain.startPlaying();
+    const plainBefore = plain.G.score;
+    plain.hit(plain.alive()[0]);
+    assert.equal(g.G.score - before, Math.round((plain.G.score - plainBefore) * 1.5));
+});
+
 // ---------------------------------------------------------------- medals
 
 test('medals are earned once, announced, and remembered across games', () => {
