@@ -1269,9 +1269,31 @@ function getReady(secs) {
 
 function shakeScreen(n) { if (!G.reduceMotion) G.shake = n; }
 
+// Dash: a quick sidestep that passes through enemy fire. Double-tap a
+// direction, press Z (or a gamepad bumper). Short cooldown between dashes.
+const DASH_SECONDS = 0.13;
+const DASH_SPEED = 1000;
+const DASH_COOLDOWN = 0.85;
+const DOUBLE_TAP = 0.25;
+function dash(dir) {
+    const p = G.player;
+    if (G.state !== 'playing' || !p || !dir || (p.dashCooldown || 0) > 0) return false;
+    p.dashT = DASH_SECONDS;
+    p.dashDir = dir;
+    p.dashCooldown = DASH_COOLDOWN;
+    G.targetX = null;
+    Sound.blip();
+    return true;
+}
+
 function movePlayer(dt) {
     const p = G.player;
-    if (G.targetX !== null) {
+    if (p.dashCooldown > 0) p.dashCooldown -= dt;
+    if (p.dashT > 0) {
+        p.dashT -= dt;
+        p.x += p.dashDir * DASH_SPEED * dt;
+        if (!G.reduceMotion) G.particles.push({ x: p.x + p.w / 2, y: p.y + p.h / 2, vx: -p.dashDir * 60, vy: 0, life: 0.25, max: 0.25, color: '#5ad7ff', size: 3 });
+    } else if (G.targetX !== null) {
         const want = clamp(G.targetX - p.w / 2, 8, W - p.w - 8);
         const d = want - p.x;
         const step = 1200 * dt;
@@ -1326,7 +1348,7 @@ function hintText(kind) {
     switch (kind) {
         case 'start': return m === 'touch' ? 'TAP TO START' : m === 'pad' ? 'PRESS START OR A TO BEGIN' : 'PRESS ENTER OR SPACE TO START';
         case 'again': return m === 'touch' ? 'TAP TO PLAY AGAIN' : m === 'pad' ? 'PRESS START TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN';
-        case 'controls': return m === 'touch' ? 'DRAG TO MOVE · TAP TO FIRE' : m === 'pad' ? 'STICK OR D-PAD MOVE · A FIRE · START PAUSE' : '← → MOVE · SPACE FIRE · SHIFT OVERDRIVE · P PAUSE · M MUTE';
+        case 'controls': return m === 'touch' ? 'DRAG TO MOVE · TAP TO FIRE · DOUBLE-TAP ◀ ▶ TO DASH' : m === 'pad' ? 'STICK MOVE · A FIRE · LB/RB DASH · B OVERDRIVE' : '← → MOVE · SPACE FIRE · Z DASH · SHIFT OVERDRIVE · P PAUSE';
         case 'difficulty': return m === 'touch' ? 'USE ◀ ▶ BELOW TO CHANGE DIFFICULTY' : m === 'pad' ? 'STICK LEFT / RIGHT TO CHANGE DIFFICULTY' : '← → TO CHANGE DIFFICULTY';
         case 'perk': return m === 'touch' ? 'TAP AN UPGRADE' : m === 'pad' ? 'D-PAD CHOOSE · A TAKE' : '← → OR 1-3 CHOOSE · ENTER TAKE';
         case 'menu': return m === 'touch' ? 'TAP AN OPTION' : m === 'pad' ? 'D-PAD SELECT · A CONFIRM · START RESUME' : '↑ ↓ SELECT · ENTER CONFIRM · P RESUME';
@@ -1759,7 +1781,7 @@ function killBoss() {
 // shielded) and play continues, false if the player died.
 function hitPlayer() {
     const player = G.player;
-    if (player.invuln > 0) return true;
+    if (player.invuln > 0 || player.dashT > 0) return true;
     if (G.shield > 0) {
         G.shield = 0;
         burst(player.x + player.w / 2, player.y, POWERUPS.shield.color, 20, 200);
@@ -2643,10 +2665,20 @@ function toggleFullscreen() {
     }
 }
 
+function tapDirection(dir) {
+    if (input.lastTapDir === dir && G.time - input.lastTapAt < DOUBLE_TAP) {
+        dash(dir);
+        input.lastTapAt = -1;
+    } else {
+        input.lastTapAt = G.time;
+    }
+    input.lastTapDir = dir;
+}
 function pressLeft(down) {
     if (down && G.state === 'start') { cycleDifficulty(-1); return; }
     if (down && G.state === 'perk') { movePerk(-1); return; }
     if (down && G.state === 'entername') { nameCycle(-1); return; }
+    if (down && !input.left) tapDirection(-1);
     input.left = down;
     if (down) input.lastDir = -1;
 }
@@ -2654,6 +2686,7 @@ function pressRight(down) {
     if (down && G.state === 'start') { cycleDifficulty(1); return; }
     if (down && G.state === 'perk') { movePerk(1); return; }
     if (down && G.state === 'entername') { nameCycle(1); return; }
+    if (down && !input.right) tapDirection(1);
     input.right = down;
     if (down) input.lastDir = 1;
 }
@@ -2696,6 +2729,7 @@ document.addEventListener('keydown', e => {
         case 'KeyF': toggleFullscreen(); break;
         case 'KeyC': if (G.state === 'gameover') shareScore(); break;
         case 'ShiftLeft': case 'ShiftRight': case 'KeyX': activateOverdrive(); break;
+        case 'KeyZ': if (!e.repeat) dash(input.left && !input.right ? -1 : input.right && !input.left ? 1 : input.lastDir || 1); break;
     }
 });
 document.addEventListener('keyup', e => {
@@ -2760,6 +2794,10 @@ function pollGamepad() {
     const odBtn = gp.buttons[1] && gp.buttons[1].pressed;
     if (odBtn && !pad_.od) activateOverdrive();
     pad_.od = odBtn;
+    const lb = gp.buttons[4] && gp.buttons[4].pressed, rb = gp.buttons[5] && gp.buttons[5].pressed;
+    if (lb && !pad_.lb) dash(-1);
+    if (rb && !pad_.rb) dash(1);
+    pad_.lb = lb; pad_.rb = rb;
     const up = (gp.buttons[12] && gp.buttons[12].pressed) || (gp.axes[1] || 0) < -0.5;
     const down = (gp.buttons[13] && gp.buttons[13].pressed) || (gp.axes[1] || 0) > 0.5;
     if (left || right || fireBtn || start || up || down) G.inputMode = 'pad';
@@ -2850,5 +2888,5 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, MODIFIERS, modifierFor, formationFor, PERKS, Online, MEDALS, activateOverdrive };
+window.SpaceInvaders = { G, input, startGame, update, draw, applyPowerup, killBoss, menuSelect, menuMove, DIFFS, Music, shareScore, watchPerformance, multiplier, choosePerk, dash, MODIFIERS, modifierFor, formationFor, PERKS, Online, MEDALS, activateOverdrive };
 })();

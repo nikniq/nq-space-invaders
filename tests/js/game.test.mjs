@@ -599,6 +599,39 @@ test('bolts far from the ship never graze', () => {
     assert.equal(g.G.grazes, 0);
 });
 
+// ---------------------------------------------------------------- dash
+
+test('Z dashes the ship sideways through enemy fire, then cools down', () => {
+    const g = makeGame();
+    g.startPlaying();
+    g.G.player.invuln = 0;
+    const p = g.G.player;
+    const x0 = p.x;
+    g.input.lastDir = -1;
+    g.key('KeyZ');
+    g.G.enemyBullets = [{ x: p.x, y: p.y, w: 4, h: 14, vx: 0, vy: 0, wobble: 0 }];
+    const lives = g.G.lives;
+    g.run(0.05, () => { g.G.enemyFireTimer = 99; });
+    assert.equal(g.G.lives, lives, 'dash is untouchable');
+    g.run(0.2, () => { g.G.enemyFireTimer = 99; });
+    assert.ok(x0 - p.x > 90, `moved ${x0 - p.x}px`);
+    assert.equal(g.api.dash(1), false, 'still cooling down');
+    g.run(1, () => { g.G.enemyFireTimer = 99; });
+    assert.equal(g.api.dash(1), true);
+});
+
+test('double-tapping a direction dashes; a slow second tap does not', () => {
+    const g = makeGame();
+    g.startPlaying();
+    const tap = code => { g.key(code); g.run(0.05); g.key(code, 'keyup'); g.run(0.05); };
+    tap('ArrowRight');
+    g.run(0.5);
+    tap('ArrowRight');
+    assert.ok(!(g.G.player.dashT > 0) && !(g.G.player.dashCooldown > 0), 'slow taps are just moves');
+    tap('ArrowRight');
+    assert.ok(g.G.player.dashCooldown > 0, 'quick double tap dashes');
+});
+
 // ---------------------------------------------------------------- modifiers
 
 test('modifiers only appear on even non-boss waves from wave 6', () => {
